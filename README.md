@@ -4,10 +4,9 @@ A centralized repository for reusable GitHub Actions composite actions. These ac
 
 ## Composite Actions Index
 - 📂 __composite__
+   - 📄 [Actions Toolbox](./composite/actions-toolbox/)
    - 📄 [Checkout and Cache](./composite/checkout-and-cache/)
       - _A composite action that combines repository checkout with intelligent dependency caching for common package managers._
-   - 📄 [Setup Environment](./composite/setup-environment/)
-      - _A composite action to set up common environment variables and tools for GitHub Actions workflows._
    - 📄 [Update Markdown Index](./composite/update-md/)
       - _Automatically generates and updates a table of contents in README.md based on composite actions._
 

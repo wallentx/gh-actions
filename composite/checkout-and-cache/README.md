@@ -1,5 +1,7 @@
 # Checkout and Cache
 
+## Description
+
 A composite action that combines repository checkout with intelligent dependency caching for common package managers.
 
 ## Inputs

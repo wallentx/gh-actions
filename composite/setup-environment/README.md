@@ -1,5 +1,7 @@
 # Setup Environment
 
+## Description
+
 A composite action to set up common environment variables and tools for GitHub Actions workflows.
 
 ## Inputs

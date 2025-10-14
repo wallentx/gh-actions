@@ -15,7 +15,8 @@ Automatically generates and updates a table of contents in README.md based on co
 
 - Automatically scans the composite actions directory
 - Extracts descriptions from each action's README.md (from `## Description` section)
-- Generates a formatted index with links to each action
+- Generates a file tree format with emojis (📂 for directories, 📄 for files)
+- Displays descriptions in italics under each action
 - Updates the main README.md with the generated content
 - Preserves documentation structure and formatting
 
@@ -60,3 +61,16 @@ A brief, single-sentence description of what this action does
 ```
 
 The script will extract the first line after the `## Description` heading to use in the index.
+
+## Output Format
+
+The generated index will be formatted as a file tree with emojis:
+
+```markdown
+## Composite Actions Index
+- 📂 __composite__
+   - 📄 [Action Name](./composite/action-name/)
+      - _Brief description of the action_
+   - 📄 [Another Action](./composite/another-action/)
+      - _Another brief description_
+```

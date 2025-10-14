@@ -3,38 +3,13 @@
 A centralized repository for reusable GitHub Actions composite actions. These actions can be referenced from any GitHub Actions workflow in any repository.
 
 ## Composite Actions Index
-### [Checkout and Cache](./composite/checkout-and-cache/)
-
-A composite action that combines repository checkout with intelligent dependency caching for common package managers.
-
-**Quick usage:**
-```yaml
-- uses: wallentx/gh-actions/composite/checkout-and-cache@main
-```
-
-See [composite/checkout-and-cache/README.md](./composite/checkout-and-cache/README.md) for full documentation.
-
-### [Setup Environment](./composite/setup-environment/)
-
-A composite action to set up common environment variables and tools for GitHub Actions workflows.
-
-**Quick usage:**
-```yaml
-- uses: wallentx/gh-actions/composite/setup-environment@main
-```
-
-See [composite/setup-environment/README.md](./composite/setup-environment/README.md) for full documentation.
-
-### [Update Markdown Index](./composite/update-md/)
-
-Automatically generates and updates a table of contents in README.md based on composite actions.
-
-**Quick usage:**
-```yaml
-- uses: wallentx/gh-actions/composite/update-md@main
-```
-
-See [composite/update-md/README.md](./composite/update-md/README.md) for full documentation.
+- 📂 __composite__
+   - 📄 [Checkout and Cache](./composite/checkout-and-cache/)
+      - _A composite action that combines repository checkout with intelligent dependency caching for common package managers._
+   - 📄 [Setup Environment](./composite/setup-environment/)
+      - _A composite action to set up common environment variables and tools for GitHub Actions workflows._
+   - 📄 [Update Markdown Index](./composite/update-md/)
+      - _Automatically generates and updates a table of contents in README.md based on composite actions._
 
 
 
@@ -108,7 +83,7 @@ inputs:
 outputs:
   my-output:
     description: 'Description of the output'
-    value: 
+    value: ${{ steps.step-id.outputs.output-name }}
 runs:
   using: 'composite'
   steps:

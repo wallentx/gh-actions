@@ -143,6 +143,7 @@ runs:
         
         # Find all action directories (excluding hidden files and directories)
         if [ -d "$COMPOSITE_DIR" ]; then
+          echo "- 📂 __composite__" >> "$README_PATH"
           while IFS= read -r action_dir; do
             action_name=$(basename "$action_dir")
             readme_file="$action_dir/README.md"
@@ -154,23 +155,16 @@ runs:
               # Extract the description (content after ## Description)
               description=$(sed -n '/^## Description$/,/^## /{ /^## Description$/d; /^## /d; p; }' "$readme_file" | sed '/^$/d' | head -1)
               
-              # Write the entry
-              echo "### [$title](./composite/$action_name/)" >> "$README_PATH"
-              echo "" >> "$README_PATH"
+              # Write the entry in file tree format
+              echo "   - 📄 [$title](./composite/$action_name/)" >> "$README_PATH"
               if [ -n "$description" ]; then
-                echo "$description" >> "$README_PATH"
+                echo "      - _${description}_" >> "$README_PATH"
               fi
-              echo "" >> "$README_PATH"
-              echo "**Quick usage:**" >> "$README_PATH"
-              echo '```yaml' >> "$README_PATH"
-              echo "- uses: wallentx/gh-actions/composite/$action_name@main" >> "$README_PATH"
-              echo '```' >> "$README_PATH"
-              echo "" >> "$README_PATH"
-              echo "See [composite/$action_name/README.md](./composite/$action_name/README.md) for full documentation." >> "$README_PATH"
-              echo "" >> "$README_PATH"
             fi
           done < <(find "$COMPOSITE_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
         fi
+        
+        echo "" >> "$README_PATH"
         
         # Add the bottom section
         echo "$README_BOTTOM" >> "$README_PATH"

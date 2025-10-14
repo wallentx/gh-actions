@@ -38,7 +38,7 @@ jobs:
         # This is required for the GitHub CLI
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        uses: wallentx/actions-toolbox@main
+        uses: wallentx/gh-actions/composite/actions-toolbox@main
         with:
           # Optional. Defaults to false. Set to true to enable verbose output of runner environment
           verbose: true
@@ -545,8 +545,8 @@ GITHUB:
   output: /runner/_work/_temp/_runner_file_commands/set_output_7cad6067-2a2a-4e01-971e-441a5156d89b
   action: __wallentx_github-workflows
   action_repository: wallentx/github-workflows
-  action_ref: wallentx/actions-toolbox
-  action_path: /runner/_work/_actions/wallentx/github-workflows/wallentx/actions-toolbox/actions/actions-toolbox
+  action_ref: wallentx/gh-actions/composite/actions-toolbox
+  action_path: /runner/_work/_actions/wallentx/github-workflows/wallentx/gh-actions/composite/actions-toolbox/actions/actions-toolbox
   action_status: success
 ENV:
   INITIAL_RX_BYTES: "1319506"
@@ -797,7 +797,7 @@ GH_TOKEN: ***
 GITHUB_ACTION: __wallentx_github-workflows
 GITHUB_ACTIONS: "true"
 GITHUB_ACTIONS_RUNNER_EXTRA_USER_AGENT: actions-runner-controller/v0.27.6
-GITHUB_ACTION_PATH: /runner/_work/_actions/wallentx/github-workflows/wallentx/actions-toolbox/actions/actions-toolbox
+GITHUB_ACTION_PATH: /runner/_work/_actions/wallentx/github-workflows/wallentx/gh-actions/composite/actions-toolbox/actions/actions-toolbox
 GITHUB_ACTION_REF: ""
 GITHUB_ACTION_REPOSITORY: ""
 GITHUB_ACTOR: wallentx
@@ -1380,8 +1380,8 @@ GITHUB:
   output: /runner/_work/_temp/_runner_file_commands/set_output_b1704e29-4d6b-4b99-9986-6e87c3cd1adc
   action: __wallentx_github-workflows
   action_repository: wallentx/github-workflows
-  action_ref: wallentx/actions-toolbox
-  action_path: /runner/_work/_actions/wallentx/github-workflows/wallentx/actions-toolbox/actions/actions-toolbox
+  action_ref: wallentx/gh-actions/composite/actions-toolbox
+  action_path: /runner/_work/_actions/wallentx/github-workflows/wallentx/gh-actions/composite/actions-toolbox/actions/actions-toolbox
   action_status: success
 ENV:
   INITIAL_RX_BYTES: "1293305"
@@ -1632,7 +1632,7 @@ GH_TOKEN: ***
 GITHUB_ACTION: __wallentx_github-workflows
 GITHUB_ACTIONS: "true"
 GITHUB_ACTIONS_RUNNER_EXTRA_USER_AGENT: actions-runner-controller/v0.27.6
-GITHUB_ACTION_PATH: /runner/_work/_actions/wallentx/github-workflows/wallentx/actions-toolbox/actions/actions-toolbox
+GITHUB_ACTION_PATH: /runner/_work/_actions/wallentx/github-workflows/wallentx/gh-actions/composite/actions-toolbox/actions/actions-toolbox
 GITHUB_ACTION_REF: ""
 GITHUB_ACTION_REPOSITORY: ""
 GITHUB_ACTOR: wallentx

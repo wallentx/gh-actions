@@ -160,7 +160,7 @@ identify_hardware_macos() {
   sEnv CPU_THREADS "$(sysctl -n hw.logicalcpu)" || sEnv CPU_THREADS ""
   sEnv MEM_TOTAL "$(sysctl -n hw.memsize | awk '{print $1/1024/1024/1024 "GB"}')" || sEnv MEM_TOTAL ""
 
-  if [[ ${RUNNER_DEBUG:-0} -eq 1 ]]; then
+  if [[ ${RUNNER_VERBOSE:-0} -eq 1 ]]; then
     echo "――――――――――――――――――――――"
     echo "Set CPU_MODEL=$CPU_MODEL"
     echo "Set CPU_CORES=$CPU_CORES"

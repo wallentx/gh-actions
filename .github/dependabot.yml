@@ -1,25 +1,10 @@
 version: 2
 updates:
-  # Maintain dependencies for GitHub Actions in workflows
-  - package-ecosystem: "github-actions"
-    directory: "/.github/workflows"
+  - package-ecosystem: github-actions
+    directories:
+      - '**/*'
     schedule:
-      interval: "weekly"
-
-  # Maintain dependencies for composite action: checkout-and-cache
-  - package-ecosystem: "github-actions"
-    directory: "/composite/checkout-and-cache"
-    schedule:
-      interval: "weekly"
-
-  # Maintain dependencies for composite action: setup-environment
-  - package-ecosystem: "github-actions"
-    directory: "/composite/setup-environment"
-    schedule:
-      interval: "weekly"
-
-  # Maintain dependencies for composite action: update-md
-  - package-ecosystem: "github-actions"
-    directory: "/composite/update-md"
-    schedule:
-      interval: "weekly"
+      interval: weekly
+    commit-message:
+      prefix: github-actions
+      include: scope

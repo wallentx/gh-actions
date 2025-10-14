@@ -1,0 +1,26 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+.tmp/
+tmp/
+
+# Log files
+*.log
+logs/
+
+# Node modules (if any test workflows use them)
+node_modules/
+
+# Environment files
+.env
+.env.local

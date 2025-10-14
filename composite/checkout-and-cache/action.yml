@@ -1,0 +1,100 @@
+name: 'Checkout and Cache'
+description: 'Checkout repository and set up dependency caching for common package managers'
+inputs:
+  ref:
+    description: 'The branch, tag or SHA to checkout'
+    required: false
+    default: ''
+  fetch-depth:
+    description: 'Number of commits to fetch. 0 indicates all history'
+    required: false
+    default: '1'
+  package-manager:
+    description: 'Package manager to cache (npm, yarn, pnpm, pip, or none)'
+    required: false
+    default: 'npm'
+  cache-path:
+    description: 'Custom path(s) to cache (overrides package-manager setting)'
+    required: false
+    default: ''
+  cache-key-prefix:
+    description: 'Prefix for the cache key'
+    required: false
+    default: 'deps'
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.ref }}
+        fetch-depth: ${{ inputs.fetch-depth }}
+    
+    - name: Get cache key
+      id: cache-key
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.cache-path }}" ]; then
+          echo "using-custom=true" >> $GITHUB_OUTPUT
+        else
+          echo "using-custom=false" >> $GITHUB_OUTPUT
+        fi
+        
+        # Generate hash for cache key based on package manager
+        case "${{ inputs.package-manager }}" in
+          npm)
+            if [ -f "package-lock.json" ]; then
+              HASH=$(sha256sum package-lock.json | cut -d' ' -f1)
+              echo "hash=$HASH" >> $GITHUB_OUTPUT
+              echo "file=package-lock.json" >> $GITHUB_OUTPUT
+            fi
+            ;;
+          yarn)
+            if [ -f "yarn.lock" ]; then
+              HASH=$(sha256sum yarn.lock | cut -d' ' -f1)
+              echo "hash=$HASH" >> $GITHUB_OUTPUT
+              echo "file=yarn.lock" >> $GITHUB_OUTPUT
+            fi
+            ;;
+          pnpm)
+            if [ -f "pnpm-lock.yaml" ]; then
+              HASH=$(sha256sum pnpm-lock.yaml | cut -d' ' -f1)
+              echo "hash=$HASH" >> $GITHUB_OUTPUT
+              echo "file=pnpm-lock.yaml" >> $GITHUB_OUTPUT
+            fi
+            ;;
+          pip)
+            if [ -f "requirements.txt" ]; then
+              HASH=$(sha256sum requirements.txt | cut -d' ' -f1)
+              echo "hash=$HASH" >> $GITHUB_OUTPUT
+              echo "file=requirements.txt" >> $GITHUB_OUTPUT
+            fi
+            ;;
+        esac
+    
+    - name: Cache dependencies
+      if: inputs.package-manager != 'none' && steps.cache-key.outputs.hash != ''
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ inputs.cache-path != '' && inputs.cache-path || 
+              (inputs.package-manager == 'npm' && '~/.npm' || 
+               inputs.package-manager == 'yarn' && '~/.yarn/cache' ||
+               inputs.package-manager == 'pnpm' && '~/.pnpm-store' ||
+               inputs.package-manager == 'pip' && '~/.cache/pip' || 
+               '~/.cache') }}
+        key: ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ inputs.package-manager }}-${{ steps.cache-key.outputs.hash }}
+        restore-keys: |
+          ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ inputs.package-manager }}-
+    
+    - name: Display cache info
+      shell: bash
+      run: |
+        echo "=== Cache Configuration ==="
+        echo "Package manager: ${{ inputs.package-manager }}"
+        if [ -n "${{ steps.cache-key.outputs.file }}" ]; then
+          echo "Lock file: ${{ steps.cache-key.outputs.file }}"
+        fi
+        if [ -n "${{ inputs.cache-path }}" ]; then
+          echo "Custom cache path: ${{ inputs.cache-path }}"
+        fi

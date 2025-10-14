@@ -1,0 +1,178 @@
+name: 'Update Markdown Index'
+description: 'Automatically generates and updates a table of contents in README.md based on composite actions'
+inputs:
+  composite-dir:
+    description: 'Directory containing composite actions'
+    required: false
+    default: 'composite'
+  readme-path:
+    description: 'Path to the README.md file to update'
+    required: false
+    default: 'README.md'
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate README index
+      shell: bash
+      run: |
+        set -e
+        
+        PROJECT_ROOT="${GITHUB_WORKSPACE}"
+        COMPOSITE_DIR="${PROJECT_ROOT}/${{ inputs.composite-dir }}"
+        README_PATH="${PROJECT_ROOT}/${{ inputs.readme-path }}"
+        
+        # Generate the top section of README
+        README_TOP=$(cat <<- 'EOF'
+        # gh-actions
+        
+        A centralized repository for reusable GitHub Actions composite actions. These actions can be referenced from any GitHub Actions workflow in any repository.
+        
+        ## Composite Actions Index
+        
+        EOF
+        )
+        
+        # Generate the bottom section of README
+        README_BOTTOM=$(cat <<- 'EOF'
+        
+        
+        ## How to Use These Actions
+        
+        ### In Your Workflows
+        
+        Reference any action in this repository using the following format:
+        
+        ```yaml
+        steps:
+          - uses: wallentx/gh-actions/composite/<action-name>@<ref>
+        ```
+        
+        Where:
+        - `<action-name>` is the directory name of the action (e.g., `setup-environment`)
+        - `<ref>` is a git reference (branch, tag, or commit SHA)
+        
+        ### Recommended Versioning
+        
+        For production workflows, it's recommended to pin to a specific version:
+        
+        ```yaml
+        # Pin to a specific commit (most secure)
+        - uses: wallentx/gh-actions/composite/setup-environment@<commit-sha>
+        
+        # Pin to a version tag (recommended)
+        - uses: wallentx/gh-actions/composite/setup-environment@v1
+        
+        # Use the latest from main branch (use with caution)
+        - uses: wallentx/gh-actions/composite/setup-environment@main
+        ```
+        
+        ## Creating New Actions
+        
+        To add a new composite action to this repository:
+        
+        1. Create a new directory under `composite/` with a descriptive name (e.g., `my-action`)
+        2. Add an `action.yml` file in that directory with your action definition
+        3. Add a `README.md` file documenting the action's usage following the standard format:
+           ```markdown
+           # Action Name
+           
+           ## Description
+           
+           A brief, single-sentence description of what this action does
+           
+           ## Inputs
+           ...
+           ```
+        4. The README index will be automatically updated when changes are pushed
+        
+        ### Composite Action Structure
+        
+        ```
+        composite/my-action/
+        ├── action.yml    # Action definition with inputs, outputs, and steps
+        └── README.md     # Documentation for the action
+        ```
+        
+        ### Example action.yml
+        
+        ```yaml
+        name: 'My Action'
+        description: 'Description of what this action does'
+        inputs:
+          my-input:
+            description: 'Description of the input'
+            required: false
+            default: 'default-value'
+        outputs:
+          my-output:
+            description: 'Description of the output'
+            value: ${{ steps.step-id.outputs.output-name }}
+        runs:
+          using: 'composite'
+          steps:
+            - name: Run a command
+              id: step-id
+              shell: bash
+              run: |
+                echo "output-name=value" >> $GITHUB_OUTPUT
+        ```
+        
+        ## Benefits of Centralized Actions
+        
+        - **Consistency**: Standardize workflows across all repositories
+        - **Maintainability**: Update actions in one place, benefit everywhere
+        - **Reusability**: Share common functionality across projects
+        - **Version Control**: Track changes and pin to specific versions
+        
+        ## Contributing
+        
+        When adding new actions, ensure they:
+        - Have clear, descriptive names
+        - Include comprehensive documentation with a `## Description` section
+        - Follow GitHub Actions best practices
+        - Are tested before committing
+        
+        ## License
+        
+        This repository is available for use in any project.
+        EOF
+        )
+        
+        # Start building the new README
+        echo "$README_TOP" > "$README_PATH"
+        
+        # Find all action directories (excluding hidden files and directories)
+        if [ -d "$COMPOSITE_DIR" ]; then
+          while IFS= read -r action_dir; do
+            action_name=$(basename "$action_dir")
+            readme_file="$action_dir/README.md"
+            
+            if [ -f "$readme_file" ]; then
+              # Extract the title (H1)
+              title=$(grep -m 1 '^# ' "$readme_file" | sed 's/^# //')
+              
+              # Extract the description (content after ## Description)
+              description=$(sed -n '/^## Description$/,/^## /{ /^## Description$/d; /^## /d; p; }' "$readme_file" | sed '/^$/d' | head -1)
+              
+              # Write the entry
+              echo "### [$title](./composite/$action_name/)" >> "$README_PATH"
+              echo "" >> "$README_PATH"
+              if [ -n "$description" ]; then
+                echo "$description" >> "$README_PATH"
+              fi
+              echo "" >> "$README_PATH"
+              echo "**Quick usage:**" >> "$README_PATH"
+              echo '```yaml' >> "$README_PATH"
+              echo "- uses: wallentx/gh-actions/composite/$action_name@main" >> "$README_PATH"
+              echo '```' >> "$README_PATH"
+              echo "" >> "$README_PATH"
+              echo "See [composite/$action_name/README.md](./composite/$action_name/README.md) for full documentation." >> "$README_PATH"
+              echo "" >> "$README_PATH"
+            fi
+          done < <(find "$COMPOSITE_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
+        fi
+        
+        # Add the bottom section
+        echo "$README_BOTTOM" >> "$README_PATH"
+        
+        echo "README.md has been updated successfully!"

@@ -83,7 +83,7 @@ inputs:
 outputs:
   my-output:
     description: 'Description of the output'
-    value: ${{ steps.step-id.outputs.output-name }}
+    value: 
 runs:
   using: 'composite'
   steps:

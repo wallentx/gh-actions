@@ -1,6 +1,6 @@
 # Actions Toolbox
 
-## Summary
+## Description
 🧰 Actions Toolbox is a composite GitHub Action designed to help with debugging, diagnostics, and tool management across various operating systems (Linux, macOS, Windows) in GitHub workflows. It performs tasks such as installing packages and tooling, identifying hardware specifications, identifying release/pre-release conditions, dumping contextual information, and setting or printing environment variables that can be used in subsequent steps, and providing rich environment and execution details for diagnostic purposes.
 
 It aims to be a lightweight, flexible, and extensible tool that can be placed into any workflow without consuming more than a few seconds of execution time, and can provide a wealth of information if you ever need to debug, or supercharge the environment variables available to subsequent steps.

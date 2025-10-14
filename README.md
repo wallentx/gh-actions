@@ -3,7 +3,6 @@
 A centralized repository for reusable GitHub Actions composite actions. These actions can be referenced from any GitHub Actions workflow in any repository.
 
 ## Composite Actions Index
-
 ### [Checkout and Cache](./composite/checkout-and-cache/)
 
 A composite action that combines repository checkout with intelligent dependency caching for common package managers.
@@ -38,6 +37,7 @@ Automatically generates and updates a table of contents in README.md based on co
 See [composite/update-md/README.md](./composite/update-md/README.md) for full documentation.
 
 
+
 ## How to Use These Actions
 
 ### In Your Workflows
@@ -55,7 +55,7 @@ Where:
 
 ### Recommended Versioning
 
-For production workflows, it is recommended to pin to a specific version:
+For production workflows, it's recommended to pin to a specific version:
 
 ```yaml
 # Pin to a specific commit (most secure)
@@ -74,7 +74,7 @@ To add a new composite action to this repository:
 
 1. Create a new directory under `composite/` with a descriptive name (e.g., `my-action`)
 2. Add an `action.yml` file in that directory with your action definition
-3. Add a `README.md` file documenting the actions usage following the standard format:
+3. Add a `README.md` file documenting the action's usage following the standard format:
    ```markdown
    # Action Name
    
@@ -98,19 +98,19 @@ composite/my-action/
 ### Example action.yml
 
 ```yaml
-name: "My Action"
-description: "Description of what this action does"
+name: 'My Action'
+description: 'Description of what this action does'
 inputs:
   my-input:
-    description: "Description of the input"
+    description: 'Description of the input'
     required: false
-    default: "default-value"
+    default: 'default-value'
 outputs:
   my-output:
-    description: "Description of the output"
-    value: ${{ steps.step-id.outputs.output-name }}
+    description: 'Description of the output'
+    value: 
 runs:
-  using: "composite"
+  using: 'composite'
   steps:
     - name: Run a command
       id: step-id

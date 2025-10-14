@@ -1,0 +1,121 @@
+---
+name: 🧰 Actions Toolbox
+description: >-
+  A collection of features to help with debugging, diagnostics, and tooling
+
+inputs:
+  verbose:
+    description: 'Enable verbose mode'
+    required: false
+    default: "false"
+  include-packages:
+    description: >-
+      Additional packages to install. Supports package versions and
+      command-to-package mapping. See action.md for details.
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set Verbose Environment Variable
+      continue-on-error: true
+      shell: bash
+      run: |
+        if [ "${{ inputs.verbose }}" = "true" ]; then
+          echo "RUNNER_VERBOSE=1" >> "$GITHUB_ENV"
+        else
+          echo "RUNNER_VERBOSE=${{ runner.debug }}" >> "$GITHUB_ENV"
+        fi
+
+    - name: Checkout code
+      continue-on-error: true
+      uses: actions/checkout@v5
+
+    - name: Check Dependencies (Linux/MacOS)
+      continue-on-error: true
+      shell: bash
+      env:
+        RUNNER_OS: ${{ runner.os }}
+        RUNNER_ARCH: ${{ runner.arch }}
+        RUNNER_TEMP: ${{ runner.temp }}
+        RUNNER_TOOL_CACHE: ${{ runner.tool_cache }}
+        RUNNER_VERBOSE: ${{ env.RUNNER_VERBOSE }}
+        INPUT_INCLUDE_PACKAGES: ${{ inputs.include-packages }}
+      run: |
+        "${GITHUB_ACTION_PATH}/scripts/check_dependencies_unix.sh"
+
+    - name: Check Dependencies (Windows)
+      continue-on-error: true
+      if: runner.os == 'Windows'
+      shell: powershell
+      env:
+        RUNNER_ARCH: ${{ runner.arch }}
+        RUNNER_TEMP: ${{ runner.temp }}
+        RUNNER_TOOL_CACHE: ${{ runner.tool_cache }}
+        RUNNER_VERBOSE: ${{ env.RUNNER_VERBOSE }}
+      run: |
+        "$Env:GITHUB_ACTION_PATH\scripts\check_dependencies_windows.ps1"
+
+    - name: Identify Runner Hardware (Linux/MacOS)
+      continue-on-error: true
+      shell: bash
+      env:
+        RUNNER_OS: ${{ runner.os }}
+        RUNNER_ARCH: ${{ runner.arch }}
+        RUNNER_TEMP: ${{ runner.temp }}
+        RUNNER_TOOL_CACHE: ${{ runner.tool_cache }}
+        RUNNER_VERBOSE: ${{ env.RUNNER_VERBOSE }}
+        INPUT_INCLUDE_PACKAGES: ${{ inputs.include-packages }}
+        GITHUB_ENV: ${{ github.env }}
+      run: |
+        "${GITHUB_ACTION_PATH}/scripts/identify_runner_hardware_unix.sh"
+
+    - name: Identify Runner Hardware (Windows)
+      if: runner.os == 'Windows' && env.RUNNER_VERBOSE == '1'
+      continue-on-error: true
+      shell: powershell
+      run: |
+        "$Env:GITHUB_ACTION_PATH\scripts\identify_runner_hardware_windows.ps1"
+
+    - name: Dump contexts
+      continue-on-error: true
+      env:
+        GITHUB_CONTEXT: ${{ toJson(github) }}
+        ENV_CONTEXT: ${{ toJson(env) }}
+        JOB_CONTEXT: ${{ toJson(job) }}
+        STEPS_CONTEXT: ${{ toJson(steps) }}
+        RUNNER_CONTEXT: ${{ toJson(runner) }}
+        STRATEGY_CONTEXT: ${{ toJson(strategy) }}
+        MATRIX_CONTEXT: ${{ toJson(matrix) }}
+        INPUTS_CONTEXT: ${{ toJson(inputs) }}
+      # These are the other contexts, but they operate mysteriously...
+      #   VARS_CONTEXT: ${{ toJson(vars) }}
+      #   JOBS_CONTEXT: ${{ toJson(jobs) }}
+      #   SECRETS_CONTEXT: ${{ toJson(secrets) }}
+      #   NEEDS_CONTEXT: ${{ toJson(needs) }}
+      shell: bash
+      run: |
+        "${GITHUB_ACTION_PATH}/scripts/dump_contexts.sh"
+
+    - name: Catch Payload
+      continue-on-error: true
+      shell: bash
+      run: |
+        jq '.' "$GITHUB_EVENT_PATH" | yq -pj -oy -C -P
+
+    - name: Set & Print ENV
+      continue-on-error: true
+      shell: bash
+      run: |
+        echo "――――――――――――――――――――――"
+        echo "Runner native job envs:"
+        echo "――――――――――――――――――――――"
+        env | sort | yq -pp -oy -C -P
+        echo "――――――――――――――――――――――"
+        echo "Setting env for steps:"
+        echo "――――――――――――――――――――――"
+        "${GITHUB_ACTION_PATH}/scripts/set_and_print_env.sh" | yq -pp -oy -C -P
+        echo "――――――――――――――――――――――"
+        echo "Complete"
+        echo "――――――――――――――――――――――"

@@ -1,0 +1,49 @@
+name: "ci"
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - '*'
+
+permissions: write-all
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: 🧰 Actions Toolbox (vanilla)
+        uses: ./
+        with:
+          verbose: false
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: 🧰 Actions Toolbox (verbose)
+        uses: ./
+        with:
+          verbose: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: 🧰 Actions Toolbox (vanilla packages)
+        uses: ./
+        with:
+          verbose: false
+          include-packages: "ffmpeg"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: 🧰 Actions Toolbox (verbose packages)
+        uses: ./
+        with:
+          verbose: true
+          include-packages: |
+            ffmpeg
+            cmake:build-essential
+            apache2=2.4*
+            python3:python3-dev=3.10*
+        env:
+          GH_TOKEN: ${{ github.token }}

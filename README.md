@@ -4,6 +4,19 @@ A centralized repository for reusable GitHub Actions composite actions. These ac
 
 ## Available Actions
 
+### [checkout-and-cache](./checkout-and-cache/)
+
+Combines repository checkout with intelligent dependency caching for common package managers (npm, yarn, pnpm, pip).
+
+**Quick usage:**
+```yaml
+- uses: wallentx/gh-actions/checkout-and-cache@main
+  with:
+    package-manager: 'npm'
+```
+
+See [checkout-and-cache/README.md](./checkout-and-cache/README.md) for full documentation.
+
 ### [setup-environment](./setup-environment/)
 
 Sets up common environment variables and tools for workflows. Includes Node.js setup with caching and environment information display.

@@ -1,4 +1,4 @@
-name: "ci"
+name: "Test Actions Toolbox"
 on:
   workflow_dispatch:
   pull_request:
@@ -15,21 +15,21 @@ jobs:
         uses: actions/checkout@v5
 
       - name: 🧰 Actions Toolbox (vanilla)
-        uses: ./
+        uses: ./composite/actions-toolbox
         with:
           verbose: false
         env:
           GH_TOKEN: ${{ github.token }}
 
       - name: 🧰 Actions Toolbox (verbose)
-        uses: ./
+        uses: ./composite/actions-toolbox
         with:
           verbose: true
         env:
           GH_TOKEN: ${{ github.token }}
 
       - name: 🧰 Actions Toolbox (vanilla packages)
-        uses: ./
+        uses: ./composite/actions-toolbox
         with:
           verbose: false
           include-packages: "ffmpeg"
@@ -37,7 +37,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
       - name: 🧰 Actions Toolbox (verbose packages)
-        uses: ./
+        uses: ./composite/actions-toolbox
         with:
           verbose: true
           include-packages: |

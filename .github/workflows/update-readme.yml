@@ -6,7 +6,8 @@ on:
     branches:
       - main
     paths:
-      - 'composite/**'
+      - 'composite/**/README.md'
+      - '.github/workflows/update-readme.yml'
 
 jobs:
   update-readme:

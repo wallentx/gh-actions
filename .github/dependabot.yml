@@ -1,0 +1,10 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - '**/*'
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: github-actions
+      include: scope

@@ -30,7 +30,7 @@ runs:
 
     - name: Checkout code
       continue-on-error: true
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
 
     - name: Check Dependencies (Linux/MacOS)
       continue-on-error: true

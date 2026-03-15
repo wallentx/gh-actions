@@ -189,43 +189,127 @@ identify_runner_hardware() {
 # Function to identify instance details
 identify_instance_details() {
   export -f sEnv
-  local TOKEN
-  TOKEN=$(
-    curl -s \
-      -X PUT "http://169.254.169.254/latest/api/token" \
-      -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"
-  )
 
-  imds() {
-    curl -s \
-      -H "X-aws-ec2-metadata-token: $TOKEN" \
-      "http://169.254.169.254/latest/dynamic/instance-identity/document"
+  # -----------------------------
+  # Helpers
+  # -----------------------------
+  detect_cloud() {
+    # prints: aws|azure|gcp|unknown
+
+    # --- AWS (EC2 IMDSv2) ---
+    local token=""
+    token="$(curl -fsS --connect-timeout 1 --max-time 2 \
+      -X PUT "http://169.254.169.254/latest/api/token" \
+      -H "X-aws-ec2-metadata-token-ttl-seconds: 60" \
+      2>/dev/null || true)"
+
+    if [[ -n "$token" ]]; then
+      local doc=""
+      doc="$(curl -fsS --connect-timeout 1 --max-time 2 \
+        -H "X-aws-ec2-metadata-token: $token" \
+        "http://169.254.169.254/latest/dynamic/instance-identity/document" \
+        2>/dev/null || true)"
+
+      if [[ -n "$doc" ]] && echo "$doc" | jq -e '.instanceId and .region' >/dev/null 2>&1; then
+        echo "aws"
+        return 0
+      fi
+    fi
+
+    # --- Azure ---
+    local az=""
+    az="$(curl -fsS --connect-timeout 1 --max-time 2 \
+      -H "Metadata:true" \
+      "http://169.254.169.254/metadata/instance?api-version=2021-02-01" \
+      2>/dev/null || true)"
+
+    if [[ -n "$az" ]] && echo "$az" | jq -e '.compute and .compute.vmId' >/dev/null 2>&1; then
+      echo "azure"
+      return 0
+    fi
+
+    # --- GCP ---
+    # GCP returns the Metadata-Flavor response header when queried correctly.
+    local gcp_headers=""
+    gcp_headers="$(curl -sS -D - --connect-timeout 1 --max-time 2 \
+      -H "Metadata-Flavor: Google" \
+      "http://169.254.169.254/computeMetadata/v1/instance/id" \
+      -o /dev/null 2>/dev/null || true)"
+
+    if echo "$gcp_headers" | grep -qi '^Metadata-Flavor: Google'; then
+      echo "gcp"
+      return 0
+    fi
+
+    echo "unknown"
   }
 
-  local INSTANCE_DETAILS
-  # convert to shell variables with no quotes and IID_ prefixed
-  # Get the instance identity document as JSON
-  local INSTANCE_JSON
-  INSTANCE_JSON="$(imds)"
+  # -----------------------------
+  # Auto-detect cloud, then act
+  # -----------------------------
+  local CLOUD_PROVIDER="unknown"
+  CLOUD_PROVIDER="$(detect_cloud || echo unknown)"
 
-  # Use yq to:
-  # - sort keys
-  # - prefix keys with IID_ and uppercase them
-  # - replace null values with empty strings
-  local INSTANCE_YQ
+  # Always export provider for visibility (optional, but useful)
+  sEnv CLOUD_PROVIDER "$CLOUD_PROVIDER" || true
+
+  if [[ "$CLOUD_PROVIDER" != "aws" ]]; then
+    echo "Not running on AWS EC2 (detected: $CLOUD_PROVIDER). Skipping IMDS instance identity."
+    return 0
+  fi
+
+  # -----------------------------
+  # AWS: fetch and export IID_* vars
+  # -----------------------------
+  local TOKEN=""
+  TOKEN="$(curl -fsS --connect-timeout 1 --max-time 2 \
+    -X PUT "http://169.254.169.254/latest/api/token" \
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" \
+    2>/dev/null || true)"
+
+  if [[ -z "$TOKEN" ]]; then
+    echo "AWS IMDS token fetch failed/empty; skipping instance detection."
+    return 0
+  fi
+
+  local INSTANCE_JSON=""
+  INSTANCE_JSON="$(curl -fsS --connect-timeout 1 --max-time 2 \
+    -H "X-aws-ec2-metadata-token: $TOKEN" \
+    "http://169.254.169.254/latest/dynamic/instance-identity/document" \
+    2>/dev/null || true)"
+
+  if [[ -z "$INSTANCE_JSON" ]]; then
+    echo "AWS IMDS instance identity document empty; skipping."
+    return 0
+  fi
+
+  # Validate JSON before yq -pj (prevents: invalid character '<' ...)
+  if ! echo "$INSTANCE_JSON" | jq -e . >/dev/null 2>&1; then
+    echo "AWS IMDS response was not valid JSON; skipping. (First bytes: $(echo "$INSTANCE_JSON" | head -c 20 | tr '\n' ' '))"
+    return 0
+  fi
+
+  local INSTANCE_YQ=""
   INSTANCE_YQ="$(yq -pj -os '
     sort_keys(.)
     | with_entries(
         .key |= ("IID_" + (. | upcase))
         | .value |= (. // "")
       )
-  ' <<< "$INSTANCE_JSON")"
+  ' <<< "$INSTANCE_JSON" 2>/dev/null || true)"
 
-  # Remove single quotes from the output
-  INSTANCE_DETAILS="$(echo "$INSTANCE_YQ" | sed "s/'//g")"
-  # set all IID_ prefixed variables
+  if [[ -z "$INSTANCE_YQ" ]]; then
+    echo "yq failed to parse/transform AWS IMDS JSON; skipping."
+    return 0
+  fi
+
+  # Remove single quotes from the output, then set IID_* vars
+  local INSTANCE_DETAILS=""
+  INSTANCE_DETAILS="${INSTANCE_YQ//\'/}"
+
   while IFS='=' read -r name value; do
-    sEnv "$name" "$value"
+    [[ -z "${name:-}" ]] && continue
+    sEnv "$name" "$value" || true
   done < <(echo "$INSTANCE_DETAILS")
 }
 

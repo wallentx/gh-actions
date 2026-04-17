@@ -108,10 +108,40 @@ runs:
       continue-on-error: true
       shell: bash
       run: |
+        injected_env_names="$(mktemp)"
+        trap 'rm -f "$injected_env_names"' EXIT
+        env_command_dir="$(dirname "$GITHUB_ENV")"
+        find "$env_command_dir" -maxdepth 1 -type f -name 'set_env_*' -print0 2>/dev/null \
+          | xargs -0 awk '
+              heredoc_delimiter != "" {
+                if ($0 == heredoc_delimiter) {
+                  heredoc_delimiter = ""
+                }
+                next
+              }
+              /^[A-Za-z_][A-Za-z0-9_]*=/ {
+                sub(/=.*/, "", $0)
+                print
+                next
+              }
+              /^[A-Za-z_][A-Za-z0-9_]*<</ {
+                heredoc_delimiter = $0
+                sub(/<<.*/, "", $0)
+                print
+                sub(/^[A-Za-z_][A-Za-z0-9_]*<</, "", heredoc_delimiter)
+                next
+              }
+            ' \
+          | sort -u > "$injected_env_names"
+
         echo "――――――――――――――――――――――"
-        echo "Runner native job envs:"
+        echo "Runner native/job envs:"
         echo "――――――――――――――――――――――"
-        env | sort | yq -pp -oy -C -P
+        env | awk -F= 'NR == FNR { injected[$0] = 1; next } !($1 in injected)' "$injected_env_names" - | sort | yq -pp -oy -C -P
+        echo "――――――――――――――――――――――"
+        echo "Injected envs from prior GITHUB_ENV writes:"
+        echo "――――――――――――――――――――――"
+        env | awk -F= 'NR == FNR { injected[$0] = 1; next } ($1 in injected)' "$injected_env_names" - | sort | yq -pp -oy -C -P
         echo "――――――――――――――――――――――"
         echo "Setting env for steps:"
         echo "――――――――――――――――――――――"

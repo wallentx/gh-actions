@@ -194,18 +194,32 @@ set_additional_env() {
 # Category: Versioning Info
 set_version_env() {
     # Fetch tags
-    git fetch -tq
+    git fetch -tq || true
     # Extract the latest tag
     GH_LATEST_TAG=$(git for-each-ref --sort=-creatordate --count=1 --format='%(refname:short)' refs/tags) || GH_LATEST_TAG=""
-    GH_LATEST_TAG_SHA=$(git rev-list -n 1 "$GH_LATEST_TAG") || GH_LATEST_TAG_SHA=""
-    GH_LATEST_RELEASE_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName') || GH_LATEST_RELEASE_TAG=""
-    GH_LATEST_RELEASE_TAG_SHA=$(git rev-list -n 1 "$GH_LATEST_RELEASE_TAG") || GH_LATEST_RELEASE_TAG_SHA=""
+    if [[ -n "$GH_LATEST_TAG" ]]; then
+        GH_LATEST_TAG_SHA=$(git rev-list -n 1 "$GH_LATEST_TAG") || GH_LATEST_TAG_SHA=""
+    else
+        GH_LATEST_TAG_SHA=""
+    fi
+
+    GH_LATEST_RELEASE_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName // ""') || GH_LATEST_RELEASE_TAG=""
+    if [[ -n "$GH_LATEST_RELEASE_TAG" ]]; then
+        GH_LATEST_RELEASE_TAG_SHA=$(git rev-list -n 1 "$GH_LATEST_RELEASE_TAG") || GH_LATEST_RELEASE_TAG_SHA=""
+    else
+        GH_LATEST_RELEASE_TAG_SHA=""
+    fi
+
     # Default values for GH_TAG_PREFIX, GH_TAG_SEMVER, and GH_TAG_SUFFIX
     GH_TAG_PREFIX=""
     GH_TAG_SEMVER="0.0.0"
     GH_TAG_SUFFIX=""
     # Extract prefix, version, and suffix
-    if [[ "$GH_LATEST_TAG" =~ ^([^0-9]*)([0-9]+)(\.([0-9]+))?(\.([0-9]+))?(-[a-zA-Z0-9]+)?$ ]]; then
+    if [[ -z "$GH_LATEST_TAG" ]]; then
+        MAJOR=0
+        MINOR=0
+        PATCH=0
+    elif [[ "$GH_LATEST_TAG" =~ ^([^0-9]*)([0-9]+)(\.([0-9]+))?(\.([0-9]+))?(-[a-zA-Z0-9]+)?$ ]]; then
         GH_TAG_PREFIX="${BASH_REMATCH[1]:-}"  # Explicitly default GH_TAG_PREFIX to empty
         MAJOR="${BASH_REMATCH[2]}"
         MINOR="${BASH_REMATCH[4]:-0}"  # Default to 0 if not present

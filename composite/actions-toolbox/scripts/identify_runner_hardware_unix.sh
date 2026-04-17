@@ -251,6 +251,143 @@ identify_instance_details() {
     echo "unknown"
   }
 
+  export_json_vars() {
+    local json="$1"
+    local filter="$2"
+    local details=""
+
+    details="$(echo "$json" | jq -r "$filter | to_entries[] | select(.value != null) | \"\(.key)=\(.value)\"" 2>/dev/null || true)"
+    if [[ -z "$details" ]]; then
+      return 1
+    fi
+
+    while IFS='=' read -r name value; do
+      [[ -z "${name:-}" ]] && continue
+      sEnv "$name" "$value" || true
+    done < <(echo "$details")
+  }
+
+  identify_aws_instance_details() {
+    local TOKEN=""
+    TOKEN="$(curl -fsS --connect-timeout 1 --max-time 2 \
+      --noproxy "*" \
+      -X PUT "http://169.254.169.254/latest/api/token" \
+      -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" \
+      2>/dev/null || true)"
+
+    if [[ -z "$TOKEN" ]]; then
+      echo "AWS IMDS token fetch failed/empty; skipping instance detection."
+      return 0
+    fi
+
+    local INSTANCE_JSON=""
+    INSTANCE_JSON="$(curl -fsS --connect-timeout 1 --max-time 2 \
+      --noproxy "*" \
+      -H "X-aws-ec2-metadata-token: $TOKEN" \
+      "http://169.254.169.254/latest/dynamic/instance-identity/document" \
+      2>/dev/null || true)"
+
+    if [[ -z "$INSTANCE_JSON" ]]; then
+      echo "AWS IMDS instance identity document empty; skipping."
+      return 0
+    fi
+
+    # Validate JSON before yq -pj (prevents: invalid character '<' ...)
+    if ! echo "$INSTANCE_JSON" | jq -e . >/dev/null 2>&1; then
+      echo "AWS IMDS response was not valid JSON; skipping. (First bytes: $(echo "$INSTANCE_JSON" | head -c 20 | tr '\n' ' '))"
+      return 0
+    fi
+
+    local INSTANCE_YQ=""
+    INSTANCE_YQ="$(yq -pj -os '
+      sort_keys(.)
+      | with_entries(
+          .key |= ("IID_" + (. | upcase))
+          | .value |= (. // "")
+        )
+    ' <<< "$INSTANCE_JSON" 2>/dev/null || true)"
+
+    if [[ -z "$INSTANCE_YQ" ]]; then
+      echo "yq failed to parse/transform AWS IMDS JSON; skipping."
+      return 0
+    fi
+
+    # Remove single quotes from the output, then set IID_* vars
+    local INSTANCE_DETAILS=""
+    INSTANCE_DETAILS="${INSTANCE_YQ//\'/}"
+
+    while IFS='=' read -r name value; do
+      [[ -z "${name:-}" ]] && continue
+      sEnv "$name" "$value" || true
+    done < <(echo "$INSTANCE_DETAILS")
+  }
+
+  identify_azure_instance_details() {
+    local INSTANCE_JSON=""
+    INSTANCE_JSON="$(curl -fsS --connect-timeout 1 --max-time 2 \
+      --noproxy "*" \
+      -H "Metadata:true" \
+      "http://169.254.169.254/metadata/instance?api-version=2025-04-07" \
+      2>/dev/null || true)"
+
+    if [[ -z "$INSTANCE_JSON" ]]; then
+      echo "Azure IMDS instance document empty; skipping."
+      return 0
+    fi
+
+    if ! echo "$INSTANCE_JSON" | jq -e '.compute' >/dev/null 2>&1; then
+      echo "Azure IMDS response was not valid JSON; skipping. (First bytes: $(echo "$INSTANCE_JSON" | head -c 20 | tr '\n' ' '))"
+      return 0
+    fi
+
+    export_json_vars "$INSTANCE_JSON" '
+      .compute
+      | {
+          AZURE_AZ_ENVIRONMENT: .azEnvironment,
+          AZURE_LOCATION: .location,
+          AZURE_NAME: .name,
+          AZURE_OS_TYPE: .osType,
+          AZURE_PLATFORM_FAULT_DOMAIN: .platformFaultDomain,
+          AZURE_PLATFORM_UPDATE_DOMAIN: .platformUpdateDomain,
+          AZURE_RESOURCE_GROUP_NAME: .resourceGroupName,
+          AZURE_RESOURCE_ID: .resourceId,
+          AZURE_SUBSCRIPTION_ID: .subscriptionId,
+          AZURE_VM_ID: .vmId,
+          AZURE_VM_SIZE: .vmSize,
+          AZURE_ZONE: .zone
+        }
+    ' || echo "Azure IMDS JSON had no recognized properties to export; skipping."
+  }
+
+  identify_gcp_instance_details() {
+    local INSTANCE_JSON=""
+    INSTANCE_JSON="$(curl -fsS --connect-timeout 1 --max-time 2 \
+      --noproxy "*" \
+      -H "Metadata-Flavor: Google" \
+      "http://metadata.google.internal/computeMetadata/v1/instance/?recursive=true" \
+      2>/dev/null || true)"
+
+    if [[ -z "$INSTANCE_JSON" ]]; then
+      echo "GCP metadata instance document empty; skipping."
+      return 0
+    fi
+
+    if ! echo "$INSTANCE_JSON" | jq -e . >/dev/null 2>&1; then
+      echo "GCP metadata response was not valid JSON; skipping. (First bytes: $(echo "$INSTANCE_JSON" | head -c 20 | tr '\n' ' '))"
+      return 0
+    fi
+
+    export_json_vars "$INSTANCE_JSON" '
+      {
+        GCP_HOSTNAME: .hostname,
+        GCP_ID: .id,
+        GCP_MACHINE_TYPE: .machineType,
+        GCP_NAME: .name,
+        GCP_ZONE: .zone
+      }
+    ' || echo "GCP metadata JSON had no recognized properties to export; skipping."
+  }
+
   # -----------------------------
   # Auto-detect cloud, then act
   # -----------------------------
@@ -260,64 +397,20 @@ identify_instance_details() {
   # Always export provider for visibility (optional, but useful)
   sEnv CLOUD_PROVIDER "$CLOUD_PROVIDER" || true
 
-  if [[ "$CLOUD_PROVIDER" != "aws" ]]; then
-    echo "Not running on AWS EC2 (detected: $CLOUD_PROVIDER). Skipping IMDS instance identity."
-    return 0
-  fi
-
-  # -----------------------------
-  # AWS: fetch and export IID_* vars
-  # -----------------------------
-  local TOKEN=""
-  TOKEN="$(curl -fsS --connect-timeout 1 --max-time 2 \
-    -X PUT "http://169.254.169.254/latest/api/token" \
-    -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" \
-    2>/dev/null || true)"
-
-  if [[ -z "$TOKEN" ]]; then
-    echo "AWS IMDS token fetch failed/empty; skipping instance detection."
-    return 0
-  fi
-
-  local INSTANCE_JSON=""
-  INSTANCE_JSON="$(curl -fsS --connect-timeout 1 --max-time 2 \
-    -H "X-aws-ec2-metadata-token: $TOKEN" \
-    "http://169.254.169.254/latest/dynamic/instance-identity/document" \
-    2>/dev/null || true)"
-
-  if [[ -z "$INSTANCE_JSON" ]]; then
-    echo "AWS IMDS instance identity document empty; skipping."
-    return 0
-  fi
-
-  # Validate JSON before yq -pj (prevents: invalid character '<' ...)
-  if ! echo "$INSTANCE_JSON" | jq -e . >/dev/null 2>&1; then
-    echo "AWS IMDS response was not valid JSON; skipping. (First bytes: $(echo "$INSTANCE_JSON" | head -c 20 | tr '\n' ' '))"
-    return 0
-  fi
-
-  local INSTANCE_YQ=""
-  INSTANCE_YQ="$(yq -pj -os '
-    sort_keys(.)
-    | with_entries(
-        .key |= ("IID_" + (. | upcase))
-        | .value |= (. // "")
-      )
-  ' <<< "$INSTANCE_JSON" 2>/dev/null || true)"
-
-  if [[ -z "$INSTANCE_YQ" ]]; then
-    echo "yq failed to parse/transform AWS IMDS JSON; skipping."
-    return 0
-  fi
-
-  # Remove single quotes from the output, then set IID_* vars
-  local INSTANCE_DETAILS=""
-  INSTANCE_DETAILS="${INSTANCE_YQ//\'/}"
-
-  while IFS='=' read -r name value; do
-    [[ -z "${name:-}" ]] && continue
-    sEnv "$name" "$value" || true
-  done < <(echo "$INSTANCE_DETAILS")
+  case "$CLOUD_PROVIDER" in
+    aws)
+      identify_aws_instance_details
+      ;;
+    azure)
+      identify_azure_instance_details
+      ;;
+    gcp)
+      identify_gcp_instance_details
+      ;;
+    *)
+      echo "Cloud provider unknown; skipping instance metadata query."
+      ;;
+  esac
 }
 
 # Main Execution Flow

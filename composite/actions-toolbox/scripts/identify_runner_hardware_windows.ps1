@@ -108,6 +108,25 @@ function Detect-CloudProvider {
     return "unknown"
 }
 
+function Export-MetadataProperties {
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Properties
+    )
+
+    $exported = $false
+    foreach ($property in $Properties.GetEnumerator() | Sort-Object Name) {
+        if ($null -eq $property.Value) {
+            continue
+        }
+
+        Set-GitHubEnv -Name $property.Name -Value $property.Value
+        $exported = $true
+    }
+
+    return $exported
+}
+
 function Identify-RunnerHardware {
     $CPU = Get-CimInstance -ClassName Win32_Processor
     $CPU_MODEL = $CPU.Name
@@ -124,15 +143,7 @@ function Identify-RunnerHardware {
     Set-GitHubEnv -Name "MEM_TOTAL" -Value $MEM_TOTAL
 }
 
-function Identify-InstanceDetails {
-    $cloudProvider = Detect-CloudProvider
-    Set-GitHubEnv -Name "CLOUD_PROVIDER" -Value $cloudProvider
-
-    if ($cloudProvider -ne "aws") {
-        Write-Host "Not running on AWS EC2 (detected: $cloudProvider). Skipping IMDS instance identity."
-        return
-    }
-
+function Identify-AwsInstanceDetails {
     $token = Get-AwsImdsToken -TtlSeconds 21600
     if ([string]::IsNullOrWhiteSpace($token)) {
         Write-Host "AWS IMDS token fetch failed/empty; skipping instance detection."
@@ -166,6 +177,96 @@ function Identify-InstanceDetails {
         $name = "IID_{0}" -f $property.Name.ToUpperInvariant()
         $value = if ($null -eq $property.Value) { "" } else { [string]$property.Value }
         Set-GitHubEnv -Name $name -Value $value
+    }
+}
+
+function Identify-AzureInstanceDetails {
+    $instanceResponse = Invoke-MetadataRequest `
+        -Uri "http://169.254.169.254/metadata/instance?api-version=2025-04-07" `
+        -Headers @{ Metadata = "true" }
+
+    if ($null -eq $instanceResponse -or [string]::IsNullOrWhiteSpace($instanceResponse.Content)) {
+        Write-Host "Azure IMDS instance document empty; skipping."
+        return
+    }
+
+    $instanceDocument = ConvertFrom-JsonSafe -Json $instanceResponse.Content
+    if ($null -eq $instanceDocument -or $null -eq $instanceDocument.compute) {
+        $previewLength = [Math]::Min(20, $instanceResponse.Content.Length)
+        $preview = $instanceResponse.Content.Substring(0, $previewLength).Replace("`r", " ").Replace("`n", " ")
+        Write-Host "Azure IMDS response was not valid JSON; skipping. (First bytes: $preview)"
+        return
+    }
+
+    $compute = $instanceDocument.compute
+    $exported = Export-MetadataProperties -Properties @{
+        "AZURE_AZ_ENVIRONMENT" = $compute.azEnvironment
+        "AZURE_LOCATION" = $compute.location
+        "AZURE_NAME" = $compute.name
+        "AZURE_OS_TYPE" = $compute.osType
+        "AZURE_PLATFORM_FAULT_DOMAIN" = $compute.platformFaultDomain
+        "AZURE_PLATFORM_UPDATE_DOMAIN" = $compute.platformUpdateDomain
+        "AZURE_RESOURCE_GROUP_NAME" = $compute.resourceGroupName
+        "AZURE_RESOURCE_ID" = $compute.resourceId
+        "AZURE_SUBSCRIPTION_ID" = $compute.subscriptionId
+        "AZURE_VM_ID" = $compute.vmId
+        "AZURE_VM_SIZE" = $compute.vmSize
+        "AZURE_ZONE" = $compute.zone
+    }
+
+    if (-not $exported) {
+        Write-Host "Azure IMDS JSON had no recognized properties to export; skipping."
+    }
+}
+
+function Identify-GcpInstanceDetails {
+    $instanceResponse = Invoke-MetadataRequest `
+        -Uri "http://metadata.google.internal/computeMetadata/v1/instance/?recursive=true" `
+        -Headers @{ "Metadata-Flavor" = "Google" }
+
+    if ($null -eq $instanceResponse -or [string]::IsNullOrWhiteSpace($instanceResponse.Content)) {
+        Write-Host "GCP metadata instance document empty; skipping."
+        return
+    }
+
+    $instanceDocument = ConvertFrom-JsonSafe -Json $instanceResponse.Content
+    if ($null -eq $instanceDocument) {
+        $previewLength = [Math]::Min(20, $instanceResponse.Content.Length)
+        $preview = $instanceResponse.Content.Substring(0, $previewLength).Replace("`r", " ").Replace("`n", " ")
+        Write-Host "GCP metadata response was not valid JSON; skipping. (First bytes: $preview)"
+        return
+    }
+
+    $exported = Export-MetadataProperties -Properties @{
+        "GCP_HOSTNAME" = $instanceDocument.hostname
+        "GCP_ID" = $instanceDocument.id
+        "GCP_MACHINE_TYPE" = $instanceDocument.machineType
+        "GCP_NAME" = $instanceDocument.name
+        "GCP_ZONE" = $instanceDocument.zone
+    }
+
+    if (-not $exported) {
+        Write-Host "GCP metadata JSON had no recognized properties to export; skipping."
+    }
+}
+
+function Identify-InstanceDetails {
+    $cloudProvider = Detect-CloudProvider
+    Set-GitHubEnv -Name "CLOUD_PROVIDER" -Value $cloudProvider
+
+    switch ($cloudProvider) {
+        "aws" {
+            Identify-AwsInstanceDetails
+        }
+        "azure" {
+            Identify-AzureInstanceDetails
+        }
+        "gcp" {
+            Identify-GcpInstanceDetails
+        }
+        default {
+            Write-Host "Cloud provider unknown; skipping instance metadata query."
+        }
     }
 }
 

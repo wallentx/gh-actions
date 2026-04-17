@@ -70,6 +70,12 @@ function Get-AwsImdsToken {
 }
 
 function Detect-CloudProvider {
+    # GitHub-hosted runners run on Azure, so avoid probing other metadata
+    # services when GitHub has already identified the runner environment.
+    if ($env:RUNNER_ENVIRONMENT -eq "github-hosted") {
+        return "azure"
+    }
+
     $token = Get-AwsImdsToken -TtlSeconds 60
     if (-not [string]::IsNullOrWhiteSpace($token)) {
         $awsResponse = Invoke-MetadataRequest `

@@ -196,6 +196,13 @@ identify_instance_details() {
   detect_cloud() {
     # prints: aws|azure|gcp|unknown
 
+    # GitHub-hosted runners run on Azure, so avoid probing other metadata
+    # services when GitHub has already identified the runner environment.
+    if [[ "${RUNNER_ENVIRONMENT:-}" == "github-hosted" ]]; then
+      echo "azure"
+      return 0
+    fi
+
     # --- AWS (EC2 IMDSv2) ---
     local token=""
     token="$(curl -fsS --connect-timeout 1 --max-time 2 \

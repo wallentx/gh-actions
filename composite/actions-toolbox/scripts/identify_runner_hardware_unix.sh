@@ -17,7 +17,18 @@ sEnv() {
     return
   }
   echo "${var_name}=${var_value}" >>"$GITHUB_ENV"
-  echo "${var_name}=${var_value}"
+  case "$var_name" in
+    IID_* | AZURE_* | GCP_*)
+      if [[ ${RUNNER_VERBOSE:-0} -eq 1 ]]; then
+        echo "${var_name}=${var_value}"
+      else
+        echo "${var_name}=<redacted>"
+      fi
+      ;;
+    *)
+      echo "${var_name}=${var_value}"
+      ;;
+  esac
   if [[ "${!var_name}" != "$var_value" ]]; then
     export "${var_name}="
     echo "${var_name}=" >>"$GITHUB_ENV"
@@ -189,6 +200,7 @@ identify_runner_hardware() {
 # Function to identify instance details
 identify_instance_details() {
   export -f sEnv
+  local AZURE_IMDS_API_VERSION="2025-04-07"
 
   # -----------------------------
   # Helpers
@@ -206,6 +218,7 @@ identify_instance_details() {
     # --- AWS (EC2 IMDSv2) ---
     local token=""
     token="$(curl -fsS --connect-timeout 1 --max-time 2 \
+      --noproxy "*" \
       -X PUT "http://169.254.169.254/latest/api/token" \
       -H "X-aws-ec2-metadata-token-ttl-seconds: 60" \
       2>/dev/null || true)"
@@ -213,6 +226,7 @@ identify_instance_details() {
     if [[ -n "$token" ]]; then
       local doc=""
       doc="$(curl -fsS --connect-timeout 1 --max-time 2 \
+        --noproxy "*" \
         -H "X-aws-ec2-metadata-token: $token" \
         "http://169.254.169.254/latest/dynamic/instance-identity/document" \
         2>/dev/null || true)"
@@ -226,8 +240,9 @@ identify_instance_details() {
     # --- Azure ---
     local az=""
     az="$(curl -fsS --connect-timeout 1 --max-time 2 \
+      --noproxy "*" \
       -H "Metadata:true" \
-      "http://169.254.169.254/metadata/instance?api-version=2021-02-01" \
+      "http://169.254.169.254/metadata/instance?api-version=${AZURE_IMDS_API_VERSION}" \
       2>/dev/null || true)"
 
     if [[ -n "$az" ]] && echo "$az" | jq -e '.compute and .compute.vmId' >/dev/null 2>&1; then
@@ -239,6 +254,7 @@ identify_instance_details() {
     # GCP returns the Metadata-Flavor response header when queried correctly.
     local gcp_headers=""
     gcp_headers="$(curl -sS -D - --connect-timeout 1 --max-time 2 \
+      --noproxy "*" \
       -H "Metadata-Flavor: Google" \
       "http://169.254.169.254/computeMetadata/v1/instance/id" \
       -o /dev/null 2>/dev/null || true)"
@@ -327,7 +343,7 @@ identify_instance_details() {
     INSTANCE_JSON="$(curl -fsS --connect-timeout 1 --max-time 2 \
       --noproxy "*" \
       -H "Metadata:true" \
-      "http://169.254.169.254/metadata/instance?api-version=2025-04-07" \
+      "http://169.254.169.254/metadata/instance?api-version=${AZURE_IMDS_API_VERSION}" \
       2>/dev/null || true)"
 
     if [[ -z "$INSTANCE_JSON" ]]; then

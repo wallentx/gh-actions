@@ -1,5 +1,20 @@
 # Description: This script retrieves hardware information about the CPU and memory from the local system using Windows Management Instrumentation, specifically the model, number of cores, number of threads, and total capacity. It also detects the cloud provider and, when running on AWS EC2, exports instance identity details to the local GitHub environment.
 
+$AzureImdsApiVersion = "2025-04-07"
+
+function Test-ShouldLogEnvValue {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    if ($env:RUNNER_VERBOSE -eq "1") {
+        return $true
+    }
+
+    return $Name -notmatch '^(IID_|AZURE_|GCP_)'
+}
+
 function Set-GitHubEnv {
     param(
         [Parameter(Mandatory = $true)]
@@ -10,7 +25,11 @@ function Set-GitHubEnv {
     )
 
     $stringValue = if ($null -eq $Value) { "" } else { [string]$Value }
-    Write-Host "Set $Name=$stringValue"
+    if (Test-ShouldLogEnvValue -Name $Name) {
+        Write-Host "Set $Name=$stringValue"
+    } else {
+        Write-Host "Set $Name=<redacted>"
+    }
     Add-Content -Path $env:GITHUB_ENV -Value "$Name=$stringValue"
 }
 
@@ -24,13 +43,27 @@ function Invoke-MetadataRequest {
     )
 
     try {
-        return Invoke-WebRequest `
-            -Uri $Uri `
-            -Method $Method `
-            -Headers $Headers `
-            -TimeoutSec $TimeoutSec `
-            -UseBasicParsing `
-            -ErrorAction Stop
+        $requestParams = @{
+            Uri             = $Uri
+            Method          = $Method
+            Headers         = $Headers
+            TimeoutSec      = $TimeoutSec
+            UseBasicParsing = $true
+            ErrorAction     = "Stop"
+        }
+
+        if ((Get-Command Invoke-WebRequest).Parameters.ContainsKey("NoProxy")) {
+            $requestParams["NoProxy"] = $true
+            return Invoke-WebRequest @requestParams
+        }
+
+        $previousProxy = [System.Net.WebRequest]::DefaultWebProxy
+        try {
+            [System.Net.WebRequest]::DefaultWebProxy = [System.Net.GlobalProxySelection]::GetEmptyWebProxy()
+            return Invoke-WebRequest @requestParams
+        } finally {
+            [System.Net.WebRequest]::DefaultWebProxy = $previousProxy
+        }
     } catch {
         return $null
     }
@@ -89,7 +122,7 @@ function Detect-CloudProvider {
     }
 
     $azureResponse = Invoke-MetadataRequest `
-        -Uri "http://169.254.169.254/metadata/instance?api-version=2021-02-01" `
+        -Uri "http://169.254.169.254/metadata/instance?api-version=$AzureImdsApiVersion" `
         -Headers @{ Metadata = "true" }
     $azureDocument = if ($azureResponse) { ConvertFrom-JsonSafe -Json $azureResponse.Content } else { $null }
 
@@ -182,7 +215,7 @@ function Identify-AwsInstanceDetails {
 
 function Identify-AzureInstanceDetails {
     $instanceResponse = Invoke-MetadataRequest `
-        -Uri "http://169.254.169.254/metadata/instance?api-version=2025-04-07" `
+        -Uri "http://169.254.169.254/metadata/instance?api-version=$AzureImdsApiVersion" `
         -Headers @{ Metadata = "true" }
 
     if ($null -eq $instanceResponse -or [string]::IsNullOrWhiteSpace($instanceResponse.Content)) {

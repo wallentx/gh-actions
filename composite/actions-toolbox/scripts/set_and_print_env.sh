@@ -193,18 +193,28 @@ set_additional_env() {
 
 # Category: Versioning Info
 set_version_env() {
-    # Fetch tags
-    git fetch -tq || true
-    # Extract the latest tag
-    GH_LATEST_TAG=$(git for-each-ref --sort=-creatordate --count=1 --format='%(refname:short)' refs/tags) || GH_LATEST_TAG=""
-    if [[ -n "$GH_LATEST_TAG" ]]; then
-        GH_LATEST_TAG_SHA=$(git rev-list -n 1 "$GH_LATEST_TAG") || GH_LATEST_TAG_SHA=""
+    GH_WORKTREE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    sEnv GH_WORKTREE_ROOT "$GH_WORKTREE_ROOT" || sEnv GH_WORKTREE_ROOT ""
+
+    if [[ -n "$GH_WORKTREE_ROOT" ]]; then
+        # Fetch tags from the caller-provided checkout. This is best-effort so
+        # diagnostics still run with read-only or otherwise limited credentials.
+        git fetch -tq || true
+        # Extract the latest tag
+        GH_LATEST_TAG=$(git for-each-ref --sort=-creatordate --count=1 --format='%(refname:short)' refs/tags) || GH_LATEST_TAG=""
+        if [[ -n "$GH_LATEST_TAG" ]]; then
+            GH_LATEST_TAG_SHA=$(git rev-list -n 1 "$GH_LATEST_TAG") || GH_LATEST_TAG_SHA=""
+        else
+            GH_LATEST_TAG_SHA=""
+        fi
     else
+        echo "Warning: GITHUB_WORKSPACE is not a git worktree; skipping git tag metadata." >&2
+        GH_LATEST_TAG=""
         GH_LATEST_TAG_SHA=""
     fi
 
     GH_LATEST_RELEASE_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName // ""') || GH_LATEST_RELEASE_TAG=""
-    if [[ -n "$GH_LATEST_RELEASE_TAG" ]]; then
+    if [[ -n "$GH_WORKTREE_ROOT" && -n "$GH_LATEST_RELEASE_TAG" ]]; then
         GH_LATEST_RELEASE_TAG_SHA=$(git rev-list -n 1 "$GH_LATEST_RELEASE_TAG") || GH_LATEST_RELEASE_TAG_SHA=""
     else
         GH_LATEST_RELEASE_TAG_SHA=""

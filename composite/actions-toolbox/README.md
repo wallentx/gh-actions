@@ -42,6 +42,9 @@ jobs:
         with:
           # Optional. Defaults to false. Set to true to enable verbose output of runner environment
           verbose: true
+          # Optional. Defaults to false. Set to true only if this action should
+          # perform its own checkout before collecting git metadata.
+          checkout: false
           # Optional. Additional packages to install.
           # Supports multiple formats:
           #   - Simple package: foo

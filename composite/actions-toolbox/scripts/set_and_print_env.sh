@@ -78,7 +78,7 @@ sEnv() {
     # Echo the variable
     echo "${var_name}=${var_value}"
     # Verify if the variable was set correctly
-    if [[ "${!var_name}" != "$var_value" ]]; then
+    if [[ "$var_value" != *$'\n'* && "${!var_name}" != "$var_value" ]]; then
         export "${var_name}="
         echo "${var_name}=" >>"$GITHUB_ENV"
         echo "Failed to set ${var_name}. Setting it to empty."
@@ -97,7 +97,7 @@ sEnvRaw() {
     }
     append_to_github_env "$var_name" "$var_value"
     echo "${var_name}=${var_value}"
-    if [[ "${!var_name}" != "$var_value" ]]; then
+    if [[ "$var_value" != *$'\n'* && "${!var_name}" != "$var_value" ]]; then
         export "${var_name}="
         echo "${var_name}=" >>"$GITHUB_ENV"
         echo "Failed to set ${var_name}. Setting it to empty."

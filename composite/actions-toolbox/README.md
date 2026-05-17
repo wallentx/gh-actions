@@ -1725,7 +1725,7 @@ GH_DEFAULT_BRANCH: main
 GH_PR_MERGED: "22"
 GH_PR: "22"
 GH_PR_TITLE: "Add env diagnostics for pull request context"
-GH_PR_BODY_JSON: "This PR updates the workflow diagnostics output."
+GH_PR_BODY_JSON: '"This PR updates the workflow diagnostics output."'
 GH_PR_AUTHOR: wallentx
 GH_PR_COMMENTS: '[{"login":"wallentx","url":"https://github.com/wallentx/sandbox/pull/22#issuecomment-2344807031"},{"login":"linus_torvalds","url":"https://github.com/wallentx/sandbox/pull/22#issuecomment-2344839554"}]'
 GH_PR_URL: https://github.com/wallentx/sandbox/pull/22

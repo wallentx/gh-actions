@@ -885,6 +885,9 @@ GH_WORKFLOW_URL: https://github.com/wallentx/sandbox/actions/runs/10820841667
 GPR_PROJECT: ghcr.io/wallentx/sandbox
 GH_DEFAULT_BRANCH: main
 GH_PR: "22"
+GH_PR_TITLE: "Add env diagnostics for pull request context"
+GH_PR_BODY: "This PR updates the workflow diagnostics output."
+GH_PR_AUTHOR: wallentx
 GH_PR_MERGED: ""
 GH_PR_COMMENTS: '[{"login":"wallentx","url":"https://github.com/wallentx/sandbox/pull/22#issuecomment-2344807031"},{"login":"linus_torvalds","url":"https://github.com/wallentx/sandbox/pull/22#issuecomment-2344839554"}]'
 GH_PR_URL: https://github.com/wallentx/sandbox/pull/22
@@ -898,6 +901,8 @@ GH_REPO_URL: https://github.com/wallentx/sandbox
 Complete
 ――――――――――――――――――――――
 ```
+
+> Note: `GH_PR_BODY` may contain multiple lines depending on the pull request description.
 
 </details>
 
@@ -1721,6 +1726,9 @@ GPR_PROJECT: ghcr.io/wallentx/sandbox
 GH_DEFAULT_BRANCH: main
 GH_PR_MERGED: "22"
 GH_PR: "22"
+GH_PR_TITLE: "Add env diagnostics for pull request context"
+GH_PR_BODY: "This PR updates the workflow diagnostics output."
+GH_PR_AUTHOR: wallentx
 GH_PR_COMMENTS: '[{"login":"wallentx","url":"https://github.com/wallentx/sandbox/pull/22#issuecomment-2344807031"},{"login":"linus_torvalds","url":"https://github.com/wallentx/sandbox/pull/22#issuecomment-2344839554"}]'
 GH_PR_URL: https://github.com/wallentx/sandbox/pull/22
 GH_PR_CREATED_AT: "2024-09-11T22:17:06Z"

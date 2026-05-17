@@ -39,6 +39,26 @@ format_time() {
 }
 
 # Function to set and print environment variables
+append_to_github_env() {
+    local var_name="$1"
+    local var_value="$2"
+    local delimiter
+
+    if [[ "$var_value" == *$'\n'* ]]; then
+        delimiter="EOF_${var_name}_$(date +%s%N)_${RANDOM}"
+        while [[ "$var_value" == *"$delimiter"* ]]; do
+            delimiter="${delimiter}_${RANDOM}"
+        done
+        {
+            echo "${var_name}<<${delimiter}"
+            echo "$var_value"
+            echo "${delimiter}"
+        } >>"$GITHUB_ENV"
+    else
+        echo "${var_name}=${var_value}" >>"$GITHUB_ENV"
+    fi
+}
+
 sEnv() {
     local var_name="$1"
     shift
@@ -54,10 +74,29 @@ sEnv() {
         return
     }
     # Append to GITHUB_ENV
-    echo "${var_name}=${var_value}" >>"$GITHUB_ENV"
+    append_to_github_env "$var_name" "$var_value"
     # Echo the variable
     echo "${var_name}=${var_value}"
     # Verify if the variable was set correctly
+    if [[ "${!var_name}" != "$var_value" ]]; then
+        export "${var_name}="
+        echo "${var_name}=" >>"$GITHUB_ENV"
+        echo "Failed to set ${var_name}. Setting it to empty."
+    fi
+}
+
+sEnvRaw() {
+    local var_name="$1"
+    shift
+    local var_value="${1-}"
+    export "${var_name}=${var_value}" || {
+        export "${var_name}="
+        echo "${var_name}=" >>"$GITHUB_ENV"
+        echo "Failed to set ${var_name}. Setting it to empty."
+        return
+    }
+    append_to_github_env "$var_name" "$var_value"
+    echo "${var_name}=${var_value}"
     if [[ "${!var_name}" != "$var_value" ]]; then
         export "${var_name}="
         echo "${var_name}=" >>"$GITHUB_ENV"
@@ -127,9 +166,10 @@ set_repository_env() {
 # Category: PR Info
 set_pr_env() {
     PR_PAYLOAD=""
+    local event_name="${GITHUB_EVENT_NAME:-}"
     # For pull_request/pull_request_target events, use PR number from event payload.
     # This avoids ambiguous branch-name lookups for fork PRs.
-    if [[ "$GITHUB_EVENT_NAME" == "pull_request" || "$GITHUB_EVENT_NAME" == "pull_request_target" ]]; then
+    if [[ "$event_name" == "pull_request" || "$event_name" == "pull_request_target" ]]; then
         PR_NUMBER="$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH")" || PR_NUMBER=""
         if [[ -n "$PR_NUMBER" ]]; then
             # Fetch all relevant PR details
@@ -140,7 +180,7 @@ set_pr_env() {
                 PR_PAYLOAD=""
             }
         fi
-    elif [[ "$GITHUB_EVENT_NAME" == "merge_group" ]]; then
+    elif [[ "$event_name" == "merge_group" ]]; then
         # If in a merge_group, extract the PR number from the branch name
         MERGE_GROUP_PR=$(sed -E 's/.*pr-([0-9]+)-.*/\1/' <<< "$GITHUB_REF_NAME")
         sEnv MERGE_GROUP_PR "$MERGE_GROUP_PR" || sEnv MERGE_GROUP_PR ""
@@ -175,9 +215,9 @@ set_pr_env() {
         GH_PR_COMMENTS=$(echo "$PR_PAYLOAD" | jq -c '[.comments? // [] | arrays | .[] | {user: .author.login, comment_url: .url}]')
         # Set environment variables
         sEnv GH_PR "$GH_PR_NUMBER" || sEnv GH_PR ""
-        sEnv GH_PR_TITLE "$GH_PR_TITLE" || sEnv GH_PR_TITLE ""
-        sEnv GH_PR_BODY "$GH_PR_BODY" || sEnv GH_PR_BODY ""
-        sEnv GH_PR_AUTHOR "$GH_PR_AUTHOR" || sEnv GH_PR_AUTHOR ""
+        sEnvRaw GH_PR_TITLE "$GH_PR_TITLE" || sEnvRaw GH_PR_TITLE ""
+        sEnvRaw GH_PR_BODY "$GH_PR_BODY" || sEnvRaw GH_PR_BODY ""
+        sEnvRaw GH_PR_AUTHOR "$GH_PR_AUTHOR" || sEnvRaw GH_PR_AUTHOR ""
         sEnv GH_PR_URL "$GH_PR_URL" || sEnv GH_PR_URL ""
         sEnv GH_PR_STATE "$GH_PR_STATE" || sEnv GH_PR_STATE ""
         sEnv GH_PR_CREATED_AT "$GH_PR_CREATED_AT" || sEnv GH_PR_CREATED_AT ""

@@ -45,7 +45,7 @@ append_to_github_env() {
     local delimiter
 
     if [[ "$var_value" == *$'\n'* ]]; then
-        delimiter="EOF_${var_name}_$(date +%s%N)_${RANDOM}"
+        delimiter="EOF_${var_name}_${$}_${RANDOM}"
         while [[ "$var_value" == *"$delimiter"* ]]; do
             delimiter="${delimiter}_${RANDOM}"
         done

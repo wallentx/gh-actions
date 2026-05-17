@@ -179,6 +179,14 @@ set_pr_env() {
                 echo "Warning: Failed to fetch PR details for PR number $PR_NUMBER" >&2
                 PR_PAYLOAD=""
             }
+        else
+            echo "Warning: pull_request event payload did not contain pull_request.number; falling back to SHA lookup for $GITHUB_SHA" >&2
+            PR_PAYLOAD=$(gh pr list --repo "$GITHUB_REPOSITORY" --search "$GITHUB_SHA" --state merged --json \
+              number,title,body,url,state,isDraft,author,headRefOid,createdAt,mergedAt,updatedAt \
+              --jq '.[0] // empty') || {
+                echo "Warning: No PR found for commit $GITHUB_SHA" >&2
+                PR_PAYLOAD=""
+            }
         fi
     elif [[ "$event_name" == "merge_group" ]]; then
         # If in a merge_group, extract the PR number from the branch name

@@ -902,7 +902,7 @@ Complete
 ――――――――――――――――――――――
 ```
 
-> Note: `GH_PR_BODY` may contain multiple lines depending on the pull request description.
+> Note: `GH_PR_BODY` is exported as a single-line JSON string (newlines are escaped). Decode with `jq -r '.'` if raw text is needed.
 
 </details>
 

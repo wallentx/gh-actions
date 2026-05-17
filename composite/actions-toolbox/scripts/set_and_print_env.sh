@@ -203,7 +203,7 @@ set_pr_env() {
     if [[ -n "$PR_PAYLOAD" ]]; then
         GH_PR_NUMBER=$(echo "$PR_PAYLOAD" | jq -r '.number // empty')
         GH_PR_TITLE=$(echo "$PR_PAYLOAD" | jq -r '.title // empty')
-        GH_PR_BODY=$(echo "$PR_PAYLOAD" | jq -r '.body // empty')
+        GH_PR_BODY=$(echo "$PR_PAYLOAD" | jq -c '.body // ""')
         GH_PR_AUTHOR=$(echo "$PR_PAYLOAD" | jq -r '.author.login // empty')
         GH_PR_URL=$(echo "$PR_PAYLOAD" | jq -r '.url // empty')
         GH_PR_STATE=$(echo "$PR_PAYLOAD" | jq -r '.state // empty')

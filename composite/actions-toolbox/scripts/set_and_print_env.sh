@@ -127,15 +127,19 @@ set_repository_env() {
 # Category: PR Info
 set_pr_env() {
     PR_PAYLOAD=""
-    # If running in a PR context
-    if [[ -n "${GITHUB_HEAD_REF:-}" ]]; then
-        # Fetch all relevant PR details
-        PR_PAYLOAD=$(gh pr view "$GITHUB_HEAD_REF" --json \
-          number,url,state,isDraft,headRefOid,createdAt,mergedAt,updatedAt,reviews,comments,reviewDecision \
-          --jq '.') || {
-            echo "Warning: Failed to fetch PR details for $GITHUB_HEAD_REF" >&2
-            PR_PAYLOAD=""
-        }
+    # For pull_request/pull_request_target events, use PR number from event payload.
+    # This avoids ambiguous branch-name lookups for fork PRs.
+    if [[ "$GITHUB_EVENT_NAME" == "pull_request" || "$GITHUB_EVENT_NAME" == "pull_request_target" ]]; then
+        PR_NUMBER="$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH")" || PR_NUMBER=""
+        if [[ -n "$PR_NUMBER" ]]; then
+            # Fetch all relevant PR details
+            PR_PAYLOAD=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json \
+              number,url,state,isDraft,headRefOid,createdAt,mergedAt,updatedAt,reviews,comments,reviewDecision \
+              --jq '.') || {
+                echo "Warning: Failed to fetch PR details for PR number $PR_NUMBER" >&2
+                PR_PAYLOAD=""
+            }
+        fi
     elif [[ "$GITHUB_EVENT_NAME" == "merge_group" ]]; then
         # If in a merge_group, extract the PR number from the branch name
         MERGE_GROUP_PR=$(sed -E 's/.*pr-([0-9]+)-.*/\1/' <<< "$GITHUB_REF_NAME")

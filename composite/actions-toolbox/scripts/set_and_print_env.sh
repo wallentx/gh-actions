@@ -180,7 +180,7 @@ set_pr_env() {
                 PR_PAYLOAD=""
             }
         else
-            echo "Warning: pull_request event payload did not contain pull_request.number; falling back to SHA lookup for $GITHUB_SHA" >&2
+            echo "Warning: ${event_name} event payload did not contain pull_request.number; falling back to SHA lookup for $GITHUB_SHA" >&2
             PR_PAYLOAD=$(gh pr list --repo "$GITHUB_REPOSITORY" --search "$GITHUB_SHA" --state merged --json \
               number,title,body,url,state,isDraft,author,headRefOid,createdAt,mergedAt,updatedAt \
               --jq '.[0] // empty') || {

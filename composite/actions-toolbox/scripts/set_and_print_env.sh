@@ -134,7 +134,7 @@ set_pr_env() {
         if [[ -n "$PR_NUMBER" ]]; then
             # Fetch all relevant PR details
             PR_PAYLOAD=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json \
-              number,url,state,isDraft,headRefOid,createdAt,mergedAt,updatedAt,reviews,comments,reviewDecision \
+              number,title,body,url,state,isDraft,author,headRefOid,createdAt,mergedAt,updatedAt,reviews,comments,reviewDecision \
               --jq '.') || {
                 echo "Warning: Failed to fetch PR details for PR number $PR_NUMBER" >&2
                 PR_PAYLOAD=""
@@ -145,7 +145,7 @@ set_pr_env() {
         MERGE_GROUP_PR=$(sed -E 's/.*pr-([0-9]+)-.*/\1/' <<< "$GITHUB_REF_NAME")
         sEnv MERGE_GROUP_PR "$MERGE_GROUP_PR" || sEnv MERGE_GROUP_PR ""
         PR_PAYLOAD=$(gh pr view "$MERGE_GROUP_PR" --json \
-          number,url,state,isDraft,headRefOid,createdAt,mergedAt,updatedAt,reviews,comments,reviewDecision \
+          number,title,body,url,state,isDraft,author,headRefOid,createdAt,mergedAt,updatedAt,reviews,comments,reviewDecision \
           --jq '.') || {
             echo "Warning: Failed to fetch PR details for $MERGE_GROUP_PR" >&2
             PR_PAYLOAD=""
@@ -153,7 +153,7 @@ set_pr_env() {
     else
         # Not in PR context; try to find the most recent merged PR associated with GITHUB_SHA
         PR_PAYLOAD=$(gh pr list --repo "$GITHUB_REPOSITORY" --search "$GITHUB_SHA" --state merged --json \
-          number,url,state,isDraft,headRefOid,createdAt,mergedAt,updatedAt \
+          number,title,body,url,state,isDraft,author,headRefOid,createdAt,mergedAt,updatedAt \
           --jq '.[0] // empty') || {
             echo "Warning: No PR found for commit $GITHUB_SHA" >&2
             PR_PAYLOAD=""
@@ -162,6 +162,9 @@ set_pr_env() {
     # If PR_PAYLOAD is populated, extract details and set environment variables
     if [[ -n "$PR_PAYLOAD" ]]; then
         GH_PR_NUMBER=$(echo "$PR_PAYLOAD" | jq -r '.number // empty')
+        GH_PR_TITLE=$(echo "$PR_PAYLOAD" | jq -r '.title // empty')
+        GH_PR_BODY=$(echo "$PR_PAYLOAD" | jq -r '.body // empty')
+        GH_PR_AUTHOR=$(echo "$PR_PAYLOAD" | jq -r '.author.login // empty')
         GH_PR_URL=$(echo "$PR_PAYLOAD" | jq -r '.url // empty')
         GH_PR_STATE=$(echo "$PR_PAYLOAD" | jq -r '.state // empty')
         GH_PR_CREATED_AT=$(echo "$PR_PAYLOAD" | jq -r '.createdAt // empty')
@@ -172,6 +175,9 @@ set_pr_env() {
         GH_PR_COMMENTS=$(echo "$PR_PAYLOAD" | jq -c '[.comments? // [] | arrays | .[] | {user: .author.login, comment_url: .url}]')
         # Set environment variables
         sEnv GH_PR "$GH_PR_NUMBER" || sEnv GH_PR ""
+        sEnv GH_PR_TITLE "$GH_PR_TITLE" || sEnv GH_PR_TITLE ""
+        sEnv GH_PR_BODY "$GH_PR_BODY" || sEnv GH_PR_BODY ""
+        sEnv GH_PR_AUTHOR "$GH_PR_AUTHOR" || sEnv GH_PR_AUTHOR ""
         sEnv GH_PR_URL "$GH_PR_URL" || sEnv GH_PR_URL ""
         sEnv GH_PR_STATE "$GH_PR_STATE" || sEnv GH_PR_STATE ""
         sEnv GH_PR_CREATED_AT "$GH_PR_CREATED_AT" || sEnv GH_PR_CREATED_AT ""

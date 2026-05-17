@@ -39,6 +39,26 @@ format_time() {
 }
 
 # Function to set and print environment variables
+append_to_github_env() {
+    local var_name="$1"
+    local var_value="$2"
+    local delimiter
+
+    if [[ "$var_value" == *$'\n'* ]]; then
+        delimiter="EOF_${var_name}_${$}_${RANDOM}"
+        while [[ "$var_value" == *"$delimiter"* ]]; do
+            delimiter="${delimiter}_${RANDOM}"
+        done
+        {
+            echo "${var_name}<<${delimiter}"
+            echo "$var_value"
+            echo "${delimiter}"
+        } >>"$GITHUB_ENV"
+    else
+        echo "${var_name}=${var_value}" >>"$GITHUB_ENV"
+    fi
+}
+
 sEnv() {
     local var_name="$1"
     shift
@@ -54,11 +74,30 @@ sEnv() {
         return
     }
     # Append to GITHUB_ENV
-    echo "${var_name}=${var_value}" >>"$GITHUB_ENV"
+    append_to_github_env "$var_name" "$var_value"
     # Echo the variable
     echo "${var_name}=${var_value}"
     # Verify if the variable was set correctly
-    if [[ "${!var_name}" != "$var_value" ]]; then
+    if [[ "$var_value" != *$'\n'* && "${!var_name}" != "$var_value" ]]; then
+        export "${var_name}="
+        echo "${var_name}=" >>"$GITHUB_ENV"
+        echo "Failed to set ${var_name}. Setting it to empty."
+    fi
+}
+
+sEnvRaw() {
+    local var_name="$1"
+    shift
+    local var_value="${1-}"
+    export "${var_name}=${var_value}" || {
+        export "${var_name}="
+        echo "${var_name}=" >>"$GITHUB_ENV"
+        echo "Failed to set ${var_name}. Setting it to empty."
+        return
+    }
+    append_to_github_env "$var_name" "$var_value"
+    echo "${var_name}=${var_value}"
+    if [[ "$var_value" != *$'\n'* && "${!var_name}" != "$var_value" ]]; then
         export "${var_name}="
         echo "${var_name}=" >>"$GITHUB_ENV"
         echo "Failed to set ${var_name}. Setting it to empty."
@@ -127,21 +166,34 @@ set_repository_env() {
 # Category: PR Info
 set_pr_env() {
     PR_PAYLOAD=""
-    # If running in a PR context
-    if [[ -n "${GITHUB_HEAD_REF:-}" ]]; then
-        # Fetch all relevant PR details
-        PR_PAYLOAD=$(gh pr view "$GITHUB_HEAD_REF" --json \
-          number,url,state,isDraft,headRefOid,createdAt,mergedAt,updatedAt,reviews,comments,reviewDecision \
-          --jq '.') || {
-            echo "Warning: Failed to fetch PR details for $GITHUB_HEAD_REF" >&2
-            PR_PAYLOAD=""
-        }
-    elif [[ "$GITHUB_EVENT_NAME" == "merge_group" ]]; then
+    local event_name="${GITHUB_EVENT_NAME:-}"
+    # For pull_request/pull_request_target events, use PR number from event payload.
+    # This avoids ambiguous branch-name lookups for fork PRs.
+    if [[ "$event_name" == "pull_request" || "$event_name" == "pull_request_target" ]]; then
+        PR_NUMBER="$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH")" || PR_NUMBER=""
+        if [[ -n "$PR_NUMBER" ]]; then
+            # Fetch all relevant PR details
+            PR_PAYLOAD=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json \
+              number,title,body,url,state,isDraft,author,headRefOid,createdAt,mergedAt,updatedAt,reviews,comments,reviewDecision \
+              --jq '.') || {
+                echo "Warning: Failed to fetch PR details for PR number $PR_NUMBER" >&2
+                PR_PAYLOAD=""
+            }
+        else
+            echo "Warning: ${event_name} event payload did not contain pull_request.number; falling back to SHA lookup for $GITHUB_SHA" >&2
+            PR_PAYLOAD=$(gh pr list --repo "$GITHUB_REPOSITORY" --search "$GITHUB_SHA" --state merged --json \
+              number,title,body,url,state,isDraft,author,headRefOid,createdAt,mergedAt,updatedAt \
+              --jq '.[0] // empty') || {
+                echo "Warning: No PR found for commit $GITHUB_SHA" >&2
+                PR_PAYLOAD=""
+            }
+        fi
+    elif [[ "$event_name" == "merge_group" ]]; then
         # If in a merge_group, extract the PR number from the branch name
         MERGE_GROUP_PR=$(sed -E 's/.*pr-([0-9]+)-.*/\1/' <<< "$GITHUB_REF_NAME")
         sEnv MERGE_GROUP_PR "$MERGE_GROUP_PR" || sEnv MERGE_GROUP_PR ""
-        PR_PAYLOAD=$(gh pr view "$MERGE_GROUP_PR" --json \
-          number,url,state,isDraft,headRefOid,createdAt,mergedAt,updatedAt,reviews,comments,reviewDecision \
+        PR_PAYLOAD=$(gh pr view "$MERGE_GROUP_PR" --repo "$GITHUB_REPOSITORY" --json \
+          number,title,body,url,state,isDraft,author,headRefOid,createdAt,mergedAt,updatedAt,reviews,comments,reviewDecision \
           --jq '.') || {
             echo "Warning: Failed to fetch PR details for $MERGE_GROUP_PR" >&2
             PR_PAYLOAD=""
@@ -149,7 +201,7 @@ set_pr_env() {
     else
         # Not in PR context; try to find the most recent merged PR associated with GITHUB_SHA
         PR_PAYLOAD=$(gh pr list --repo "$GITHUB_REPOSITORY" --search "$GITHUB_SHA" --state merged --json \
-          number,url,state,isDraft,headRefOid,createdAt,mergedAt,updatedAt \
+          number,title,body,url,state,isDraft,author,headRefOid,createdAt,mergedAt,updatedAt \
           --jq '.[0] // empty') || {
             echo "Warning: No PR found for commit $GITHUB_SHA" >&2
             PR_PAYLOAD=""
@@ -158,6 +210,9 @@ set_pr_env() {
     # If PR_PAYLOAD is populated, extract details and set environment variables
     if [[ -n "$PR_PAYLOAD" ]]; then
         GH_PR_NUMBER=$(echo "$PR_PAYLOAD" | jq -r '.number // empty')
+        GH_PR_TITLE=$(echo "$PR_PAYLOAD" | jq -r '.title // empty')
+        GH_PR_BODY_JSON=$(echo "$PR_PAYLOAD" | jq -cr '.body // empty | @json')
+        GH_PR_AUTHOR=$(echo "$PR_PAYLOAD" | jq -r '.author.login // empty')
         GH_PR_URL=$(echo "$PR_PAYLOAD" | jq -r '.url // empty')
         GH_PR_STATE=$(echo "$PR_PAYLOAD" | jq -r '.state // empty')
         GH_PR_CREATED_AT=$(echo "$PR_PAYLOAD" | jq -r '.createdAt // empty')
@@ -168,14 +223,17 @@ set_pr_env() {
         GH_PR_COMMENTS=$(echo "$PR_PAYLOAD" | jq -c '[.comments? // [] | arrays | .[] | {user: .author.login, comment_url: .url}]')
         # Set environment variables
         sEnv GH_PR "$GH_PR_NUMBER" || sEnv GH_PR ""
+        sEnvRaw GH_PR_TITLE "$GH_PR_TITLE" || sEnvRaw GH_PR_TITLE ""
+        sEnvRaw GH_PR_BODY_JSON "$GH_PR_BODY_JSON" || sEnvRaw GH_PR_BODY_JSON ""
+        sEnvRaw GH_PR_AUTHOR "$GH_PR_AUTHOR" || sEnvRaw GH_PR_AUTHOR ""
         sEnv GH_PR_URL "$GH_PR_URL" || sEnv GH_PR_URL ""
         sEnv GH_PR_STATE "$GH_PR_STATE" || sEnv GH_PR_STATE ""
         sEnv GH_PR_CREATED_AT "$GH_PR_CREATED_AT" || sEnv GH_PR_CREATED_AT ""
         sEnv GH_PR_MERGED_AT "$GH_PR_MERGED_AT" || sEnv GH_PR_MERGED_AT ""
         sEnv GH_PR_UPDATED_AT "$GH_PR_UPDATED_AT" || sEnv GH_PR_UPDATED_AT ""
         sEnv GH_PR_IS_DRAFT "$GH_PR_IS_DRAFT" || sEnv GH_PR_IS_DRAFT ""
-        sEnv GH_PR_REVIEWS "$GH_PR_REVIEWS" || sEnv GH_PR_REVIEWS ""
-        sEnv GH_PR_COMMENTS "$GH_PR_COMMENTS" || sEnv GH_PR_COMMENTS ""
+        sEnvRaw GH_PR_REVIEWS "$GH_PR_REVIEWS" || sEnvRaw GH_PR_REVIEWS ""
+        sEnvRaw GH_PR_COMMENTS "$GH_PR_COMMENTS" || sEnvRaw GH_PR_COMMENTS ""
         # Calculate time differences
         if [[ -n "$GH_PR_CREATED_AT" && -n "$GH_PR_MERGED_AT" ]]; then
             MERGED_DIFF_SECONDS=$(( $(date -d "$GH_PR_MERGED_AT" +%s) - $(date -d "$GH_PR_CREATED_AT" +%s) ))

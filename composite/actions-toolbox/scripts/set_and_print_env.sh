@@ -192,7 +192,7 @@ set_pr_env() {
         # If in a merge_group, extract the PR number from the branch name
         MERGE_GROUP_PR=$(sed -E 's/.*pr-([0-9]+)-.*/\1/' <<< "$GITHUB_REF_NAME")
         sEnv MERGE_GROUP_PR "$MERGE_GROUP_PR" || sEnv MERGE_GROUP_PR ""
-        PR_PAYLOAD=$(gh pr view "$MERGE_GROUP_PR" --json \
+        PR_PAYLOAD=$(gh pr view "$MERGE_GROUP_PR" --repo "$GITHUB_REPOSITORY" --json \
           number,title,body,url,state,isDraft,author,headRefOid,createdAt,mergedAt,updatedAt,reviews,comments,reviewDecision \
           --jq '.') || {
             echo "Warning: Failed to fetch PR details for $MERGE_GROUP_PR" >&2
@@ -211,8 +211,7 @@ set_pr_env() {
     if [[ -n "$PR_PAYLOAD" ]]; then
         GH_PR_NUMBER=$(echo "$PR_PAYLOAD" | jq -r '.number // empty')
         GH_PR_TITLE=$(echo "$PR_PAYLOAD" | jq -r '.title // empty')
-        # Keep GH_PR_BODY as JSON-encoded single-line text to avoid multiline env values.
-        GH_PR_BODY=$(echo "$PR_PAYLOAD" | jq -cr '.body // empty | @json')
+        GH_PR_BODY_JSON=$(echo "$PR_PAYLOAD" | jq -cr '.body // empty | @json')
         GH_PR_AUTHOR=$(echo "$PR_PAYLOAD" | jq -r '.author.login // empty')
         GH_PR_URL=$(echo "$PR_PAYLOAD" | jq -r '.url // empty')
         GH_PR_STATE=$(echo "$PR_PAYLOAD" | jq -r '.state // empty')
@@ -225,7 +224,7 @@ set_pr_env() {
         # Set environment variables
         sEnv GH_PR "$GH_PR_NUMBER" || sEnv GH_PR ""
         sEnvRaw GH_PR_TITLE "$GH_PR_TITLE" || sEnvRaw GH_PR_TITLE ""
-        sEnvRaw GH_PR_BODY "$GH_PR_BODY" || sEnvRaw GH_PR_BODY ""
+        sEnvRaw GH_PR_BODY_JSON "$GH_PR_BODY_JSON" || sEnvRaw GH_PR_BODY_JSON ""
         sEnvRaw GH_PR_AUTHOR "$GH_PR_AUTHOR" || sEnvRaw GH_PR_AUTHOR ""
         sEnv GH_PR_URL "$GH_PR_URL" || sEnv GH_PR_URL ""
         sEnv GH_PR_STATE "$GH_PR_STATE" || sEnv GH_PR_STATE ""
@@ -233,8 +232,8 @@ set_pr_env() {
         sEnv GH_PR_MERGED_AT "$GH_PR_MERGED_AT" || sEnv GH_PR_MERGED_AT ""
         sEnv GH_PR_UPDATED_AT "$GH_PR_UPDATED_AT" || sEnv GH_PR_UPDATED_AT ""
         sEnv GH_PR_IS_DRAFT "$GH_PR_IS_DRAFT" || sEnv GH_PR_IS_DRAFT ""
-        sEnv GH_PR_REVIEWS "$GH_PR_REVIEWS" || sEnv GH_PR_REVIEWS ""
-        sEnv GH_PR_COMMENTS "$GH_PR_COMMENTS" || sEnv GH_PR_COMMENTS ""
+        sEnvRaw GH_PR_REVIEWS "$GH_PR_REVIEWS" || sEnvRaw GH_PR_REVIEWS ""
+        sEnvRaw GH_PR_COMMENTS "$GH_PR_COMMENTS" || sEnvRaw GH_PR_COMMENTS ""
         # Calculate time differences
         if [[ -n "$GH_PR_CREATED_AT" && -n "$GH_PR_MERGED_AT" ]]; then
             MERGED_DIFF_SECONDS=$(( $(date -d "$GH_PR_MERGED_AT" +%s) - $(date -d "$GH_PR_CREATED_AT" +%s) ))

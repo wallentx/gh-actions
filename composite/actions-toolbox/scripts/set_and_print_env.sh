@@ -104,6 +104,69 @@ sEnvRaw() {
     fi
 }
 
+paths_to_json_array() {
+    jq -R -s -c 'split("\n") | map(select(length > 0)) | unique'
+}
+
+git_changed_files_json() {
+    local diff_filter="$1"
+    local base_sha="${2-}"
+    local head_sha="${3:-$GITHUB_SHA}"
+
+    if [[ -n "$base_sha" && "$base_sha" != "0000000000000000000000000000000000000000" ]]; then
+        git diff -M -C --name-only --diff-filter="$diff_filter" "$base_sha" "$head_sha" | paths_to_json_array
+    else
+        git diff-tree -M -C --diff-filter="$diff_filter" --no-commit-id --name-only -r -m "$head_sha" | paths_to_json_array
+    fi
+}
+
+push_payload_changed_files_json() {
+    local change_kind="$1"
+
+    case "$change_kind" in
+        modified)
+            jq -c '[.commits[]? | (.added[]?, .modified[]?)] | unique' "$GITHUB_EVENT_PATH"
+            ;;
+        deleted)
+            jq -c '[.commits[]? | .removed[]?] | unique' "$GITHUB_EVENT_PATH"
+            ;;
+    esac
+}
+
+pr_api_changed_files_json() {
+    local pr_number="$1"
+    local change_kind="$2"
+    local jq_filter
+
+    case "$change_kind" in
+        modified)
+            jq_filter='[.[][] | select(.status == "added" or .status == "modified" or .status == "changed" or .status == "renamed" or .status == "copied") | .filename] | unique'
+            ;;
+        deleted)
+            jq_filter='[.[][] | select(.status == "removed") | .filename] | unique'
+            ;;
+    esac
+
+    gh api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/files?per_page=100" --jq "$jq_filter" | jq -c .
+}
+
+event_range_base_sha() {
+    jq -r '.pull_request.base.sha // .merge_group.base_sha // .before // empty' "$GITHUB_EVENT_PATH"
+}
+
+event_range_head_sha() {
+    jq -r '.pull_request.head.sha // .merge_group.head_sha // .after // env.GITHUB_SHA' "$GITHUB_EVENT_PATH"
+}
+
+set_changed_file_env_raw() {
+    local var_name="$1"
+    local var_value="$2"
+
+    if ! sEnvRaw "$var_name" "$var_value"; then
+        echo "Warning: Failed to export ${var_name}; continuing without changed-file metadata." >&2
+    fi
+}
+
 # -----------------------------
 # Environment Variable Categories
 # -----------------------------
@@ -161,6 +224,97 @@ set_repository_env() {
     # Note: This may fail if permissions are lacking
     # This needs Administrative: read
     # sEnv GH_REPO_REQUIRED_REVIEWS "$(gh api /repos/${GITHUB_REPOSITORY}/branches/${GH_DEFAULT_BRANCH}/protection --jq '.required_pull_request_reviews.required_approving_review_count')" || sEnv GH_REPO_REQUIRED_REVIEWS ""
+}
+
+# Category: Changed Files
+set_changed_files_env() {
+    local event_name="${GITHUB_EVENT_NAME:-}"
+    local files_modified="[]"
+    local files_deleted="[]"
+    local pr_number=""
+    local base_sha=""
+    local head_sha="${GITHUB_SHA:-}"
+    local changed_files_collected="false"
+
+    if [[ "$event_name" == "push" ]]; then
+        base_sha="$(event_range_base_sha)" || base_sha=""
+        head_sha="$(event_range_head_sha)" || head_sha="${GITHUB_SHA:-}"
+        if [[ -n "$base_sha" && "$base_sha" != "0000000000000000000000000000000000000000" ]] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            if files_modified="$(git_changed_files_json ACMR "$base_sha" "$head_sha")" && files_deleted="$(git_changed_files_json D "$base_sha" "$head_sha")"; then
+                changed_files_collected="true"
+            else
+                echo "Warning: Failed to collect changed files from git metadata for push ${base_sha}..${head_sha:-HEAD}; falling back to push payload." >&2
+                files_modified="[]"
+                files_deleted="[]"
+            fi
+        fi
+        if [[ "$changed_files_collected" != "true" ]]; then
+            files_modified="$(push_payload_changed_files_json modified)" || {
+                echo "Warning: Failed to collect modified files from push event payload." >&2
+                files_modified="[]"
+            }
+            files_deleted="$(push_payload_changed_files_json deleted)" || {
+                echo "Warning: Failed to collect deleted files from push event payload." >&2
+                files_deleted="[]"
+            }
+            changed_files_collected="true"
+        fi
+    elif [[ "$event_name" == "pull_request" || "$event_name" == "pull_request_target" ]]; then
+        pr_number="$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH")" || pr_number=""
+        if [[ -n "$pr_number" ]]; then
+            if files_modified="$(pr_api_changed_files_json "$pr_number" modified)" && files_deleted="$(pr_api_changed_files_json "$pr_number" deleted)"; then
+                changed_files_collected="true"
+            else
+                echo "Warning: Failed to collect modified files from GitHub API for PR $pr_number." >&2
+                files_modified="[]"
+                files_deleted="[]"
+            fi
+        else
+            echo "Warning: ${event_name} event payload did not contain pull_request.number; falling back to git changed file detection." >&2
+        fi
+    elif [[ "$event_name" == "merge_group" ]]; then
+        pr_number="$(sed -E 's/.*pr-([0-9]+)-.*/\1/' <<< "${GITHUB_REF_NAME:-}")"
+        if [[ "$pr_number" =~ ^[0-9]+$ ]]; then
+            if files_modified="$(pr_api_changed_files_json "$pr_number" modified)" && files_deleted="$(pr_api_changed_files_json "$pr_number" deleted)"; then
+                changed_files_collected="true"
+            else
+                echo "Warning: Failed to collect modified files from GitHub API for merge-group PR $pr_number." >&2
+                files_modified="[]"
+                files_deleted="[]"
+            fi
+        else
+            echo "Warning: Could not extract PR number from merge_group ref '${GITHUB_REF_NAME:-}'; falling back to git changed file detection." >&2
+        fi
+    fi
+
+    if [[ "$changed_files_collected" != "true" && "$event_name" != "push" ]]; then
+        base_sha="$(event_range_base_sha)" || base_sha=""
+        head_sha="$(event_range_head_sha)" || head_sha="${GITHUB_SHA:-}"
+        if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            if files_modified="$(git_changed_files_json ACMR "$base_sha" "$head_sha")" && files_deleted="$(git_changed_files_json D "$base_sha" "$head_sha")"; then
+                changed_files_collected="true"
+            else
+                echo "Warning: Failed to collect modified files from git metadata for ${base_sha:-single commit}..${head_sha:-HEAD}." >&2
+                files_modified="[]"
+                files_deleted="[]"
+            fi
+        else
+            echo "Warning: GITHUB_WORKSPACE is not a git worktree; skipping git changed file fallback." >&2
+        fi
+    fi
+
+    if ! jq -e 'type == "array"' >/dev/null <<< "$files_modified"; then
+        echo "Warning: FILES_MODIFIED changed-file metadata was not a JSON array; using []." >&2
+        files_modified="[]"
+    fi
+    if ! jq -e 'type == "array"' >/dev/null <<< "$files_deleted"; then
+        echo "Warning: FILES_DELETED changed-file metadata was not a JSON array; using []." >&2
+        files_deleted="[]"
+    fi
+
+    set_changed_file_env_raw FILES_MODIFIED "$files_modified"
+    set_changed_file_env_raw FILES_DELETED "$files_deleted"
+    return 0
 }
 
 # Category: PR Info
@@ -334,10 +488,11 @@ set_version_env() {
 # -----------------------------
 
 main() {
-    # Categories: Basic Repository Info, Release Info, Repository Info, PR Info, Additional Info, Versioning Info
+    # Categories: Basic Repository Info, Release Info, Repository Info, Changed Files, PR Info, Additional Info, Versioning Info
     set_basic_repository_env
     set_release_env
     set_repository_env
+    set_changed_files_env
     set_pr_env
     set_additional_env
     set_version_env

@@ -147,7 +147,7 @@ pr_api_changed_files_json() {
             ;;
     esac
 
-    gh api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/files?per_page=100" --jq "$jq_filter" | jq -c .
+    gh api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/pulls/${pr_number}/files?per_page=100" | jq -c "$jq_filter"
 }
 
 event_range_base_sha() {

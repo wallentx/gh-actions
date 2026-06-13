@@ -881,7 +881,7 @@ GH_EVENT_ACTION: "null"
 REPO: sandbox
 RFC_REPO: sandbox
 GIT_SHORT_HASH: b1c1a305
-FILES_MODIFIED: '[".github/workflows/stats.yml"]'
+FILES_CHANGED: '[".github/workflows/stats.yml"]'
 FILES_DELETED: '[]'
 GH_WORKFLOW_URL: https://github.com/wallentx/sandbox/actions/runs/10820841667
 GPR_PROJECT: ghcr.io/wallentx/sandbox
@@ -1721,7 +1721,7 @@ GH_EVENT_ACTION: "null"
 REPO: sandbox
 RFC_REPO: sandbox
 GIT_SHORT_HASH: b1c1a305
-FILES_MODIFIED: '[".github/workflows/stats.yml"]'
+FILES_CHANGED: '[".github/workflows/stats.yml"]'
 FILES_DELETED: '[]'
 GH_WORKFLOW_URL: https://github.com/wallentx/sandbox/actions/runs/10820841667
 GPR_PROJECT: ghcr.io/wallentx/sandbox

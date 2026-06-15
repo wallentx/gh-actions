@@ -78,6 +78,47 @@ function Test-ChocolateyPackage {
     return $installed -match "^$Package\s+"
 }
 
+# Function to detect the existing GitHub CLI version
+function Get-GitHubCliVersion {
+    try {
+        $versionLine = (& gh --version 2>$null | Select-Object -First 1)
+        if ($versionLine -match '\bv?(\d+(\.\d+)+([-][A-Za-z0-9._-]+)?)\b') {
+            return "v$($matches[1].TrimStart('v'))"
+        }
+    } catch {
+        return "unknown"
+    }
+
+    return "unknown"
+}
+
+# Function to fetch and validate the latest release tag from GitHub
+function Get-LatestGitHubReleaseTag {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Repository
+    )
+
+    $uri = "https://api.github.com/repos/$Repository/releases/latest"
+    try {
+        $response = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+    } catch {
+        throw "Failed to fetch latest release metadata for $Repository from $uri. $($_.Exception.Message)"
+    }
+
+    try {
+        $metadata = $response.Content | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        throw "Release metadata for $Repository was not valid JSON."
+    }
+
+    if ($null -eq $metadata -or [string]::IsNullOrWhiteSpace([string]$metadata.tag_name)) {
+        throw "Release metadata for $Repository did not include a non-empty tag_name."
+    }
+
+    return [string]$metadata.tag_name
+}
+
 # Ensure directories exist
 New-Item -ItemType Directory -Force -Path $RUNNER_TEMP, $RUNNER_TOOL_CACHE | Out-Null
 
@@ -168,23 +209,30 @@ Write-Host "::endgroup::"
 
 # Fetch the latest versions
 Write-Host "::group::Setting up GitHub CLI"
-Write-Host "Fetching the latest GitHub CLI version..."
-$GH_CLI_VERSION = (curl -Ls https://api.github.com/repos/cli/cli/releases/latest | jq -r '.tag_name')
-Write-Host "Latest GitHub CLI version: $GH_CLI_VERSION"
+$InstallGitHubCli = $false
+$ghCommand = Get-Command -Name gh -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($ghCommand) {
+    $ghPath = if ($ghCommand.Source) { $ghCommand.Source } else { $ghCommand.Definition }
+    $GH_CLI_VERSION = Get-GitHubCliVersion
+    Write-Host "GitHub CLI found on PATH at $ghPath"
+    Write-Host "Detected GitHub CLI version: $GH_CLI_VERSION"
+} else {
+    $InstallGitHubCli = $true
+    Write-Host "GitHub CLI not found on PATH. Fetching latest GitHub CLI version..."
+    $GH_CLI_VERSION = Get-LatestGitHubReleaseTag -Repository "cli/cli"
+    Write-Host "Latest GitHub CLI version: $GH_CLI_VERSION"
+}
 Write-Host "::endgroup::"
 
 Write-Host "::group::Setting up yq YAML processor"
 Write-Host "Fetching the latest yq version..."
-$YQ_VERSION = (curl -Ls https://api.github.com/repos/mikefarah/yq/releases/latest | jq -r '.tag_name')
+$YQ_VERSION = Get-LatestGitHubReleaseTag -Repository "mikefarah/yq"
 Write-Host "Latest yq version: $YQ_VERSION"
 Write-Host "::endgroup::"
 
 # Record tool versions to GITHUB_ENV
 Add-Content -Path $env:GITHUB_ENV -Value "GH_CLI_VERSION=$GH_CLI_VERSION"
 Add-Content -Path $env:GITHUB_ENV -Value "YQ_VERSION=$YQ_VERSION"
-
-# Extract the version number without the 'v' prefix
-$GH_CLI_VERSION_NUMBER = $GH_CLI_VERSION.TrimStart('v')
 
 $os = 'windows'
 switch ($env:RUNNER_ARCH) {
@@ -201,32 +249,42 @@ Write-Host "::group::Installing tools"
 Write-Host "Detected architecture: $arch"
 
 # Define the gh-cli and yq binary names
-$gh_cli_binary = "bin/gh.exe"
+$gh_cli_binary = "gh.exe"
 $yq_binary = "yq.exe"
-
-$gh_cli_path = "$RUNNER_TOOL_CACHE\gh-cli\$GH_CLI_VERSION\$os`_$arch"
-$gh_cli_temp_path = "$RUNNER_TEMP\gh-cli-temp"
+$pathsToAdd = @()
 
 # Check if gh-cli is already in the tool cache
-if (-not (Test-Path -Path "$gh_cli_path\gh.exe")) {
-    Write-Host "gh-cli not found in cache. Proceeding with download and installation."
-    New-Item -ItemType Directory -Force -Path $gh_cli_path | Out-Null
-    New-Item -ItemType Directory -Force -Path $gh_cli_temp_path | Out-Null
+if ($InstallGitHubCli) {
+    # Extract the version number without the 'v' prefix
+    $GH_CLI_VERSION_NUMBER = $GH_CLI_VERSION.TrimStart('v')
 
-    $gh_cli_url = "https://github.com/cli/cli/releases/download/$GH_CLI_VERSION/gh_${GH_CLI_VERSION_NUMBER}_${os}_${arch}.zip"
-    Invoke-WebRequest -Uri $gh_cli_url -OutFile "$RUNNER_TEMP\gh_${GH_CLI_VERSION_NUMBER}_${os}_${arch}.zip"
+    $gh_cli_path = "$RUNNER_TOOL_CACHE\gh-cli\$GH_CLI_VERSION\$os`_$arch"
+    $gh_cli_temp_path = "$RUNNER_TEMP\gh-cli-temp"
 
-    # Extract the archive to the temporary location
-    Expand-Archive -Path "$RUNNER_TEMP\gh_${GH_CLI_VERSION_NUMBER}_${os}_${arch}.zip" -DestinationPath "$gh_cli_temp_path"
+    if (-not (Test-Path -Path "$gh_cli_path\$gh_cli_binary")) {
+        Write-Host "gh-cli not found in cache. Proceeding with download and installation."
+        New-Item -ItemType Directory -Force -Path $gh_cli_path | Out-Null
+        New-Item -ItemType Directory -Force -Path $gh_cli_temp_path | Out-Null
 
-    # Move the gh binary to the desired location
-    Move-Item -Path "$gh_cli_temp_path\bin\gh.exe" -Destination "$gh_cli_path\gh.exe" -Force
+        $gh_cli_url = "https://github.com/cli/cli/releases/download/$GH_CLI_VERSION/gh_${GH_CLI_VERSION_NUMBER}_${os}_${arch}.zip"
+        Invoke-WebRequest -Uri $gh_cli_url -OutFile "$RUNNER_TEMP\gh_${GH_CLI_VERSION_NUMBER}_${os}_${arch}.zip"
 
-    # Clean up the temporary files
-    Remove-Item -Recurse -Force $gh_cli_temp_path
-    Remove-Item -Force "$RUNNER_TEMP\gh_${GH_CLI_VERSION_NUMBER}_${os}_${arch}.zip"
+        # Extract the archive to the temporary location
+        Expand-Archive -Path "$RUNNER_TEMP\gh_${GH_CLI_VERSION_NUMBER}_${os}_${arch}.zip" -DestinationPath "$gh_cli_temp_path"
+
+        # Move the gh binary to the desired location
+        Move-Item -Path "$gh_cli_temp_path\bin\gh.exe" -Destination "$gh_cli_path\$gh_cli_binary" -Force
+
+        # Clean up the temporary files
+        Remove-Item -Recurse -Force $gh_cli_temp_path
+        Remove-Item -Force "$RUNNER_TEMP\gh_${GH_CLI_VERSION_NUMBER}_${os}_${arch}.zip"
+    } else {
+        Write-Host "gh-cli found in cache at $gh_cli_path"
+    }
+
+    $pathsToAdd += $gh_cli_path
 } else {
-    Write-Host "gh-cli found in cache at $gh_cli_path"
+    Write-Host "Using existing GitHub CLI; skipping installation."
 }
 
 # Check if yq is already in the tool cache
@@ -240,15 +298,18 @@ if (-not (Test-Path -Path "$yq_path\$yq_binary")) {
 } else {
   Write-Host "yq found in cache at $yq_path"
 }
+$pathsToAdd += $yq_path
 
 # Define paths
-$combinedPaths = "$gh_cli_path;$yq_path"
+$combinedPaths = ($pathsToAdd | Where-Object { $_ }) -join ";"
 
 # Write combined paths to GITHUB_PATH
-$combinedPaths | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+if (-not [string]::IsNullOrWhiteSpace($combinedPaths)) {
+  $combinedPaths | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-# Optionally, update the PATH for the current process
-[System.Environment]::SetEnvironmentVariable('PATH', "$combinedPaths;$env:PATH", [System.EnvironmentVariableTarget]::Process)
+  # Optionally, update the PATH for the current process
+  [System.Environment]::SetEnvironmentVariable('PATH', "$combinedPaths;$env:PATH", [System.EnvironmentVariableTarget]::Process)
+}
 
 Write-Host "::endgroup::"
 Write-Host "::endgroup::"

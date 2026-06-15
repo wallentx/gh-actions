@@ -225,7 +225,40 @@ check_and_install_dependencies() {
 # Function to fetch the latest version from GitHub API
 fetch_latest_version() {
   local repo="$1"
-  curl -Ls "https://api.github.com/repos/$repo/releases/latest" | jq -r '.tag_name'
+  curl -fsSL "https://api.github.com/repos/$repo/releases/latest" | jq -r '.tag_name'
+}
+
+# Function to append a directory to the tool path list
+append_toolpath() {
+  local path="$1"
+
+  if [[ -z "$path" ]]; then
+    return
+  fi
+
+  if [[ -z "$TOOLPATH" ]]; then
+    TOOLPATH="$path"
+  else
+    TOOLPATH="${TOOLPATH}:${path}"
+  fi
+}
+
+# Function to detect the existing GitHub CLI version
+detect_existing_gh_version() {
+  gh --version 2>/dev/null | awk '
+    NR == 1 {
+      for (i = 1; i <= NF; i++) {
+        if ($i ~ /^v?[0-9]+([.][0-9]+)+([-][A-Za-z0-9._-]+)?$/) {
+          version = $i
+          if (version !~ /^v/) {
+            version = "v" version
+          }
+          print version
+          exit
+        }
+      }
+    }
+  '
 }
 
 # Function to determine architecture
@@ -254,14 +287,15 @@ install_gh_cli() {
   if [ ! -f "${gh_cli_path}/${gh_cli_binary}" ]; then
     echo "gh-cli not found in cache. Downloading and installing..."
     mkdir -p "${gh_cli_path}"
+    local gh_cli_archive="gh_${version#v}_${os}_${arch}.tar.gz"
     local gh_cli_url="https://github.com/cli/cli/releases/download/${version}/gh_${version#v}_${os}_${arch}.tar.gz"
-    curl -fsSL "${gh_cli_url}" -o "${RUNNER_TEMP}/gh_${version#v}_${os}_${arch}.tar.gz"
-    tar -xzf "${RUNNER_TEMP}/gh_${gh_cli_version#v}_${os}_${arch}.tar.gz" -C "${gh_cli_path}" "gh_${gh_cli_version#v}_${os}_${arch}/${gh_cli_binary}" --transform='s|.*/||'
+    curl -fsSL "${gh_cli_url}" -o "${RUNNER_TEMP}/${gh_cli_archive}"
+    tar -xzf "${RUNNER_TEMP}/${gh_cli_archive}" -C "${gh_cli_path}" "gh_${version#v}_${os}_${arch}/${gh_cli_binary}" --transform='s|.*/||'
   else
     echo "gh-cli found in cache at ${gh_cli_path}"
   fi
 
-  TOOLPATH="${gh_cli_path}"
+  append_toolpath "${gh_cli_path}"
 }
 
 # Function to install yq
@@ -284,12 +318,14 @@ install_yq() {
     echo "yq found in cache at ${yq_path}"
   fi
 
-  TOOLPATH="${TOOLPATH}:${yq_path}"
+  append_toolpath "${yq_path}"
 }
 
 # Function to update the PATH
 update_path() {
-  echo "${TOOLPATH}" >> "$GITHUB_PATH"
+  if [[ -n "$TOOLPATH" ]]; then
+    echo "${TOOLPATH}" >> "$GITHUB_PATH"
+  fi
 }
 
 # Main Execution Flow
@@ -315,12 +351,22 @@ main() {
   # Check and install all packages
   check_and_install_dependencies "$allPackages"
 
-  local gh_cli_version yq_version arch os
+  local gh_cli_version yq_version arch os gh_cli_install_required gh_cli_path
 
   echo "::group::Setting up GitHub CLI"
-  echo "Fetching the latest GitHub CLI version..."
-  gh_cli_version=$(fetch_latest_version "cli/cli")
-  echo "Latest GitHub CLI version: $gh_cli_version"
+  if command_exists gh; then
+    gh_cli_path="$(command -v gh)"
+    gh_cli_version="$(detect_existing_gh_version || true)"
+    gh_cli_version="${gh_cli_version:-unknown}"
+    gh_cli_install_required=0
+    echo "GitHub CLI found on PATH at ${gh_cli_path}"
+    echo "Detected GitHub CLI version: $gh_cli_version"
+  else
+    gh_cli_install_required=1
+    echo "GitHub CLI not found on PATH. Fetching latest GitHub CLI version..."
+    gh_cli_version=$(fetch_latest_version "cli/cli")
+    echo "Latest GitHub CLI version: $gh_cli_version"
+  fi
   echo "::endgroup::"
 
   echo "::group::Setting up yq YAML processor"
@@ -338,7 +384,11 @@ main() {
   arch=$(determine_arch)
   echo "Detected architecture: $arch"
 
-  install_gh_cli "$gh_cli_version" "$os" "$arch"
+  if [[ "$gh_cli_install_required" -eq 1 ]]; then
+    install_gh_cli "$gh_cli_version" "$os" "$arch"
+  else
+    echo "Using existing GitHub CLI; skipping installation."
+  fi
   install_yq "$yq_version" "$os" "$arch"
 
   update_path

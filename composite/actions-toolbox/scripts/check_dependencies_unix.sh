@@ -225,7 +225,19 @@ check_and_install_dependencies() {
 # Function to fetch the latest version from GitHub API
 fetch_latest_version() {
   local repo="$1"
-  curl -fsSL "https://api.github.com/repos/$repo/releases/latest" | jq -r '.tag_name'
+  local response tag
+
+  if ! response="$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest")"; then
+    echo "Failed to fetch latest release metadata for $repo." >&2
+    return 1
+  fi
+
+  if ! tag="$(printf '%s' "$response" | jq -er 'objects.tag_name | select(type == "string" and length > 0)' 2>/dev/null)"; then
+    echo "Release metadata for $repo was not valid JSON with a non-empty tag_name." >&2
+    return 1
+  fi
+
+  printf '%s\n' "$tag"
 }
 
 # Function to append a directory to the tool path list
@@ -281,7 +293,8 @@ install_gh_cli() {
   local os="$2"
   local arch="$3"
 
-  local gh_cli_binary="bin/gh"
+  local gh_cli_binary="gh"
+  local gh_cli_archive_binary="bin/gh"
   local gh_cli_path="${RUNNER_TOOL_CACHE}/gh-cli/${version}/${os}_${arch}"
 
   if [ ! -f "${gh_cli_path}/${gh_cli_binary}" ]; then
@@ -290,7 +303,7 @@ install_gh_cli() {
     local gh_cli_archive="gh_${version#v}_${os}_${arch}.tar.gz"
     local gh_cli_url="https://github.com/cli/cli/releases/download/${version}/gh_${version#v}_${os}_${arch}.tar.gz"
     curl -fsSL "${gh_cli_url}" -o "${RUNNER_TEMP}/${gh_cli_archive}"
-    tar -xzf "${RUNNER_TEMP}/${gh_cli_archive}" -C "${gh_cli_path}" "gh_${version#v}_${os}_${arch}/${gh_cli_binary}" --transform='s|.*/||'
+    tar -xzf "${RUNNER_TEMP}/${gh_cli_archive}" -C "${gh_cli_path}" "gh_${version#v}_${os}_${arch}/${gh_cli_archive_binary}" --transform='s|.*/||'
   else
     echo "gh-cli found in cache at ${gh_cli_path}"
   fi

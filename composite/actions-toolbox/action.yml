@@ -37,7 +37,7 @@ runs:
     - name: Checkout code
       if: inputs.checkout == 'true'
       continue-on-error: true
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
 
     - name: Check Dependencies (Linux/MacOS)
       continue-on-error: true

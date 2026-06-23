@@ -1,6 +1,10 @@
 name: 'Update Markdown Index'
-description: 'Automatically generates and updates a table of contents in README.md based on composite actions'
+description: 'Automatically generates and updates README.md indexes for reusable workflows and composite actions'
 inputs:
+  workflow-dir:
+    description: 'Directory containing reusable workflows'
+    required: false
+    default: '.github/workflows'
   composite-dir:
     description: 'Directory containing composite actions'
     required: false
@@ -14,87 +18,227 @@ runs:
   steps:
     - name: Generate README index
       shell: bash
+      env:
+        INPUT_WORKFLOW_DIR: ${{ inputs.workflow-dir }}
+        INPUT_COMPOSITE_DIR: ${{ inputs.composite-dir }}
+        INPUT_README_PATH: ${{ inputs.readme-path }}
       run: |
         set -e
-        
+
         PROJECT_ROOT="${GITHUB_WORKSPACE}"
-        COMPOSITE_DIR="${PROJECT_ROOT}/${{ inputs.composite-dir }}"
-        README_PATH="${PROJECT_ROOT}/${{ inputs.readme-path }}"
-        
+
+        validate_workspace_relative_path() {
+          local input_name="$1"
+          local input_path="$2"
+
+          if [ -z "$input_path" ]; then
+            echo "$input_name must not be empty." >&2
+            exit 1
+          fi
+
+          case "$input_path" in
+            /*|..|../*|*/..|*/../*)
+              echo "$input_name must be relative to the workspace and must not contain '..' segments: $input_path" >&2
+              exit 1
+              ;;
+          esac
+        }
+
+        validate_workspace_relative_path "workflow-dir" "$INPUT_WORKFLOW_DIR"
+        validate_workspace_relative_path "composite-dir" "$INPUT_COMPOSITE_DIR"
+        validate_workspace_relative_path "readme-path" "$INPUT_README_PATH"
+
+        WORKFLOW_DIR="${PROJECT_ROOT}/${INPUT_WORKFLOW_DIR}"
+        COMPOSITE_DIR="${PROJECT_ROOT}/${INPUT_COMPOSITE_DIR}"
+        README_PATH="${PROJECT_ROOT}/${INPUT_README_PATH}"
+        TEMP_ROOT="${RUNNER_TEMP:-${TMPDIR:-.}}"
+        reusable_entries=""
+        replacement_readme=""
+
+        cleanup_temp_files() {
+          [ -z "${reusable_entries:-}" ] || rm -f "$reusable_entries"
+          [ -z "${replacement_readme:-}" ] || rm -f "$replacement_readme"
+        }
+        trap cleanup_temp_files EXIT
+
         # Generate the top section of README
         README_TOP=$(cat <<- 'EOF'
         # gh-actions
-        
-        A centralized repository for reusable GitHub Actions composite actions. These actions can be referenced from any GitHub Actions workflow in any repository.
-        
-        ## Composite Actions Index
-        
+
+        A centralized repository for reusable GitHub Actions workflows and composite actions. These actions and workflows can be referenced from any GitHub Actions workflow in any repository.
+
         EOF
         )
-        
+
         # Generate the bottom section of README
         README_BOTTOM=$(cat <<- 'EOF'
-        
-        
+
+        ## Termux Run Usage
+
+        `.github/workflows/termux-run.yml` runs arbitrary commands inside a Termux pacman Docker environment on GitHub's hosted ARM runner. It is intended for public repositories that need a free ARM64 Termux execution environment without maintaining their own Termux Docker wrapper script.
+
+        ```yaml
+        jobs:
+          termux:
+            uses: wallentx/gh-actions/.github/workflows/termux-run.yml@main
+            with:
+              packages: |
+                clang
+              copy-paths: |
+                README.md
+              env: |
+                TERMUX_RUN_MODE=ci
+              commands: |
+                set -Eeuo pipefail
+                test "$TERMUX_RUN_MODE" = "ci"
+                clang --version
+        ```
+
+        ### Inputs
+
+        | Input | Description | Required | Default |
+        |-------|-------------|----------|---------|
+        | `packages` | Newline or whitespace separated pacman packages to install before running commands | No | `""` |
+        | `copy-paths` | Newline separated files or directories copied into the Termux workspace | No | `.` |
+        | `exclude-paths` | Newline separated tar exclude patterns omitted while staging files | No | `.git`, `./.git` |
+        | `env` | Newline separated `KEY=value` entries exported for host prep and inside Termux | No | `""` |
+        | `host-commands` | Bash commands run on the ARM Ubuntu host before staging files | No | `""` |
+        | `commands` | Bash commands run inside Termux | Yes | N/A |
+        | `sync-back-paths` | Newline separated files or directories copied back into the GitHub workspace | No | `""` |
+        | `upload-artifact-name` | Artifact name used to upload synced paths | No | `""` |
+        | `termux-image` | Docker image that provides the Termux pacman environment | No | `termux/termux-docker-pacman` |
+        | `runs-on` | GitHub-hosted runner label | No | `ubuntu-24.04-arm` |
+        | `checkout` | Whether to run `actions/checkout` for the caller repository | No | `true` |
+        | `default-packages` | Whether to install default packages such as `termux-exec` | No | `true` |
+        | `upgrade-system` | Whether to run a full `pacman -Syu` before installing packages | No | `false` |
+        | `pacman-timeout-minutes` | Timeout for each pacman transaction | No | `10` |
+
+        ### Copy And Sync Model
+
+        The workflow stages only `copy-paths` into a clean Termux workspace under `${PREFIX:-/data/data/com.termux/files/usr}/tmp/ci-workspace`. Use `exclude-paths` to omit generated directories such as `target`, `bin`, or `staging` when copying a broad path like `.`.
+
+        Use `host-commands` for downloads or artifact preparation that should happen on the Ubuntu ARM host before staging. Values from the `env` input are exported before `host-commands` run and again inside Termux. Use `sync-back-paths` when commands produce files that later workflow jobs need. If `upload-artifact-name` is set, synced files are also uploaded with `actions/upload-artifact`.
+
+        The workflow refreshes pacman package databases before installing requested packages, but it does not run a full base-image upgrade by default. Set `upgrade-system: true` only when the caller explicitly needs `pacman -Syu` before package installation. Each pacman transaction is bounded by `pacman-timeout-minutes`, so post-transaction hook hangs fail the job instead of consuming the whole runner timeout.
+
+        Host preparation commands receive `GH_TOKEN` and `GITHUB_TOKEN` from the workflow token. To use a different token, pass the optional `github-token` secret.
+
+        Set caller job permissions for whatever `host-commands` need. For example, current-repository release downloads usually need `contents: read`; Actions artifact downloads usually need `actions: read`; uploading artifacts via `upload-artifact-name` usually needs `actions: write`.
+
+        ### Artifact Smoke Example
+
+        ```yaml
+        jobs:
+          termux-artifact-smoke:
+            permissions:
+              contents: read
+            uses: wallentx/gh-actions/.github/workflows/termux-run.yml@main
+            with:
+              packages: |
+                ca-certificates
+                libc++
+                tar
+                zstd
+              env: |
+                RELEASE_TAG=rust-v0.0.0-termux
+              host-commands: |
+                mkdir -p artifact
+                gh release download "$RELEASE_TAG" --pattern '*aarch64-linux-android*.tar.gz' --dir artifact
+              copy-paths: |
+                artifact
+              commands: |
+                set -Eeuo pipefail
+                archive="$(find artifact -type f -name '*aarch64-linux-android*.tar.gz' -print -quit)"
+                test -n "$archive"
+                mkdir -p smoke
+                tar -xzf "$archive" -C smoke
+                find smoke -maxdepth 3 -type f -print
+        ```
+
+        ### PR Check Matrix Example
+
+        ```yaml
+        jobs:
+          termux:
+            strategy:
+              matrix:
+                include:
+                  - packages: clang
+                    commands: |
+                      clang --version
+                      clang-format --version
+                  - packages: cppcheck
+                    commands: |
+                      cppcheck --version
+            uses: wallentx/gh-actions/.github/workflows/termux-run.yml@main
+            with:
+              packages: __EXPR_OPEN__ matrix.packages __EXPR_CLOSE__
+              copy-paths: |
+                lib
+              commands: |
+                set -Eeuo pipefail
+                __EXPR_OPEN__ matrix.commands __EXPR_CLOSE__
+        ```
+
         ## How to Use These Actions
-        
+
         ### In Your Workflows
-        
+
         Reference any action in this repository using the following format:
-        
+
         ```yaml
         steps:
           - uses: wallentx/gh-actions/composite/<action-name>@<ref>
         ```
-        
+
         Where:
         - `<action-name>` is the directory name of the action (e.g., `setup-environment`)
         - `<ref>` is a git reference (branch, tag, or commit SHA)
-        
+
         ### Recommended Versioning
-        
+
         For production workflows, it's recommended to pin to a specific version:
-        
+
         ```yaml
         # Pin to a specific commit (most secure)
         - uses: wallentx/gh-actions/composite/setup-environment@<commit-sha>
-        
+
         # Pin to a version tag (recommended)
         - uses: wallentx/gh-actions/composite/setup-environment@v1
-        
+
         # Use the latest from main branch (use with caution)
         - uses: wallentx/gh-actions/composite/setup-environment@main
         ```
-        
+
         ## Creating New Actions
-        
+
         To add a new composite action to this repository:
-        
+
         1. Create a new directory under `composite/` with a descriptive name (e.g., `my-action`)
         2. Add an `action.yml` file in that directory with your action definition
         3. Add a `README.md` file documenting the action's usage following the standard format:
            ```markdown
            # Action Name
-           
+
            ## Description
-           
+
            A brief, single-sentence description of what this action does
-           
+
            ## Inputs
            ...
            ```
         4. The README index will be automatically updated when changes are pushed
-        
+
         ### Composite Action Structure
-        
+
         ```
         composite/my-action/
         ├── action.yml    # Action definition with inputs, outputs, and steps
         └── README.md     # Documentation for the action
         ```
-        
+
         ### Example action.yml
-        
+
         ```yaml
         name: 'My Action'
         description: 'Description of what this action does'
@@ -106,7 +250,7 @@ runs:
         outputs:
           my-output:
             description: 'Description of the output'
-            value: ${{ steps.step-id.outputs.output-name }}
+            value: __EXPR_OPEN__ steps.step-id.outputs.output-name __EXPR_CLOSE__
         runs:
           using: 'composite'
           steps:
@@ -116,57 +260,114 @@ runs:
               run: |
                 echo "output-name=value" >> $GITHUB_OUTPUT
         ```
-        
+
         ## Benefits of Centralized Actions
-        
+
         - **Consistency**: Standardize workflows across all repositories
         - **Maintainability**: Update actions in one place, benefit everywhere
         - **Reusability**: Share common functionality across projects
         - **Version Control**: Track changes and pin to specific versions
-        
+
         ## Contributing
-        
+
         When adding new actions, ensure they:
         - Have clear, descriptive names
         - Include comprehensive documentation with a `## Description` section
         - Follow GitHub Actions best practices
         - Are tested before committing
-        
+
         ## License
-        
+
         This repository is available for use in any project.
         EOF
         )
-        
+
         # Start building the new README
+        mkdir -p "$(dirname "$README_PATH")"
         echo "$README_TOP" > "$README_PATH"
-        
+        echo "" >> "$README_PATH"
+
+        # Find reusable workflows with workflow_call triggers.
+        if [ -d "$WORKFLOW_DIR" ]; then
+          reusable_count=0
+          reusable_entries="$(mktemp "$TEMP_ROOT/update-md-reusable.XXXXXX")"
+
+          while IFS= read -r workflow_file; do
+            if ! grep -Eq '^[[:space:]]*workflow_call:' "$workflow_file"; then
+              continue
+            fi
+
+            workflow_name="$(
+              sed -n 's/^name:[[:space:]]*//p' "$workflow_file" |
+                head -1 |
+                sed -e 's/^["'\'']//; s/["'\'']$//'
+            )"
+            if [ -z "$workflow_name" ]; then
+              workflow_name="$(basename "$workflow_file")"
+            fi
+
+            workflow_description="$(
+              sed -n 's/^# Description:[[:space:]]*//p' "$workflow_file" |
+                head -1
+            )"
+
+            workflow_rel="${workflow_file#"$PROJECT_ROOT"/}"
+            {
+              echo "   - 📄 [$workflow_name](./$workflow_rel)"
+              if [ -n "$workflow_description" ]; then
+                echo "      - _${workflow_description}_"
+              fi
+            } >> "$reusable_entries"
+            reusable_count=$((reusable_count + 1))
+          done < <(find "$WORKFLOW_DIR" -maxdepth 1 -type f -name '*.yml' | sort)
+
+          if [ "$reusable_count" -gt 0 ]; then
+            {
+              echo "## Reusable Workflows Index"
+              echo "- 📂 __${INPUT_WORKFLOW_DIR}__"
+              cat "$reusable_entries"
+              echo ""
+            } >> "$README_PATH"
+          fi
+        fi
+
+        echo "## Composite Actions Index" >> "$README_PATH"
+
         # Find all action directories (excluding hidden files and directories)
         if [ -d "$COMPOSITE_DIR" ]; then
-          echo "- 📂 __composite__" >> "$README_PATH"
+          echo "- 📂 __${INPUT_COMPOSITE_DIR}__" >> "$README_PATH"
           while IFS= read -r action_dir; do
-            action_name=$(basename "$action_dir")
+            action_rel="${action_dir#"$PROJECT_ROOT"/}"
             readme_file="$action_dir/README.md"
-            
+
             if [ -f "$readme_file" ]; then
               # Extract the title (H1)
               title=$(grep -m 1 '^# ' "$readme_file" | sed 's/^# //')
-              
+
               # Extract the description (content after ## Description)
               description=$(sed -n '/^## Description$/,/^## /{ /^## Description$/d; /^## /d; p; }' "$readme_file" | sed '/^$/d' | head -1)
-              
+
               # Write the entry in file tree format
-              echo "   - 📄 [$title](./composite/$action_name/)" >> "$README_PATH"
+              echo "   - 📄 [$title](./$action_rel/)" >> "$README_PATH"
               if [ -n "$description" ]; then
                 echo "      - _${description}_" >> "$README_PATH"
               fi
             fi
           done < <(find "$COMPOSITE_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
         fi
-        
+
         echo "" >> "$README_PATH"
-        
+
         # Add the bottom section
         echo "$README_BOTTOM" >> "$README_PATH"
-        
+
+        expr_open='$''{{'
+        expr_close='}}'
+        replacement_readme="$(mktemp "$TEMP_ROOT/update-md-readme.XXXXXX")"
+        sed \
+          -e "s/__EXPR_OPEN__/${expr_open}/g" \
+          -e "s/__EXPR_CLOSE__/${expr_close}/g" \
+          "$README_PATH" > "$replacement_readme"
+        mv "$replacement_readme" "$README_PATH"
+
         echo "README.md has been updated successfully!"

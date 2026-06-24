@@ -1,0 +1,401 @@
+# Description: Run arbitrary commands inside a Termux pacman Docker environment on GitHub's hosted ARM runner.
+name: Termux Run
+
+on:
+  workflow_call:
+    inputs:
+      packages:
+        description: >-
+          Newline or whitespace separated pacman packages to install before
+          running commands.
+        required: false
+        type: string
+        default: ""
+      copy-paths:
+        description: >-
+          Newline separated files or directories to copy from the GitHub
+          workspace into the Termux workspace.
+        required: false
+        type: string
+        default: "."
+      exclude-paths:
+        description: >-
+          Newline separated tar exclude patterns to omit while staging files.
+        required: false
+        type: string
+        default: |
+          .git
+          ./.git
+      env:
+        description: >-
+          Newline separated KEY=value entries exported for host preparation
+          commands and inside Termux.
+        required: false
+        type: string
+        default: ""
+      host-commands:
+        description: >-
+          Optional Bash commands to run on the ARM Ubuntu host before files are
+          staged into Termux.
+        required: false
+        type: string
+        default: ""
+      commands:
+        description: Bash commands to run inside Termux.
+        required: true
+        type: string
+      sync-back-paths:
+        description: >-
+          Newline separated files or directories copied from Termux back into
+          the GitHub workspace after commands finish.
+        required: false
+        type: string
+        default: ""
+      upload-artifact-name:
+        description: >-
+          Optional artifact name used to upload sync-back paths after they are
+          restored into the GitHub workspace.
+        required: false
+        type: string
+        default: ""
+      termux-image:
+        description: Docker image that provides the Termux pacman environment.
+        required: false
+        type: string
+        default: termux/termux-docker-pacman
+      runs-on:
+        description: GitHub-hosted runner label.
+        required: false
+        type: string
+        default: ubuntu-24.04-arm
+      checkout:
+        description: Whether to check out the caller repository.
+        required: false
+        type: boolean
+        default: true
+      default-packages:
+        description: Whether to install default packages such as termux-exec.
+        required: false
+        type: boolean
+        default: true
+      upgrade-system:
+        description: Whether to run a full pacman system upgrade before installing packages.
+        required: false
+        type: boolean
+        default: false
+      pacman-timeout-minutes:
+        description: Timeout, in minutes, for each pacman transaction.
+        required: false
+        type: number
+        default: 10
+    secrets:
+      github-token:
+        description: Optional token exposed to host preparation commands as GH_TOKEN.
+        required: false
+
+jobs:
+  run:
+    name: Run Termux Commands
+    runs-on: ${{ inputs['runs-on'] }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repository
+        if: ${{ inputs.checkout }}
+        uses: actions/checkout@v7
+      - name: Run host preparation commands
+        if: ${{ inputs['host-commands'] != '' }}
+        env:
+          INPUT_HOST_COMMANDS: ${{ inputs['host-commands'] }}
+          INPUT_ENV: ${{ inputs.env }}
+          GH_TOKEN: ${{ secrets['github-token'] || github.token }}
+          GITHUB_TOKEN: ${{ secrets['github-token'] || github.token }}
+        run: |
+          set -Eeuo pipefail
+
+          env_script="${RUNNER_TEMP}/termux-host-env.sh"
+          : > "$env_script"
+          while IFS= read -r line || [ -n "$line" ]; do
+            line="${line%$'\r'}"
+            [ -n "$line" ] || continue
+            case "$line" in
+              \#*) continue ;;
+            esac
+            if [[ "$line" != *=* ]]; then
+              echo "Invalid env entry, expected KEY=value: $line" >&2
+              exit 1
+            fi
+            name="${line%%=*}"
+            env_value="${line#*=}"
+            if [[ ! "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+              echo "Invalid env variable name: $name" >&2
+              exit 1
+            fi
+            printf 'export %s=%q\n' "$name" "$env_value" >> "$env_script"
+          done <<< "$INPUT_ENV"
+
+          # shellcheck source=/dev/null
+          source "$env_script"
+          host_script="${RUNNER_TEMP}/termux-host-commands.sh"
+          printf '%s\n' "$INPUT_HOST_COMMANDS" > "$host_script"
+          bash "$host_script"
+
+      - name: Prepare Termux manifests
+        env:
+          INPUT_PACKAGES: ${{ inputs.packages }}
+          INPUT_COPY_PATHS: ${{ inputs['copy-paths'] }}
+          INPUT_EXCLUDE_PATHS: ${{ inputs['exclude-paths'] }}
+          INPUT_ENV: ${{ inputs.env }}
+          INPUT_COMMANDS: ${{ inputs.commands }}
+          INPUT_SYNC_BACK_PATHS: ${{ inputs['sync-back-paths'] }}
+          INPUT_DEFAULT_PACKAGES: ${{ inputs['default-packages'] }}
+          INPUT_UPGRADE_SYSTEM: ${{ inputs['upgrade-system'] }}
+          INPUT_PACMAN_TIMEOUT_MINUTES: ${{ inputs['pacman-timeout-minutes'] }}
+          TERMUX_RUN_DIR: ${{ runner.temp }}/termux-run
+          TERMUX_OUTPUT_DIR: ${{ runner.temp }}/termux-run-output
+        run: |
+          set -Eeuo pipefail
+
+          run_dir="${TERMUX_RUN_DIR}"
+          output_dir="${TERMUX_OUTPUT_DIR}"
+          rm -rf "$run_dir" "$output_dir"
+          mkdir -p "$run_dir" "$output_dir"
+          chmod 0777 "$output_dir"
+
+          write_path_lines() {
+            local value="$1"
+            local output="$2"
+            : > "$output"
+            while IFS= read -r line || [ -n "$line" ]; do
+              line="${line%$'\r'}"
+              [ -n "$line" ] || continue
+              printf '%s\n' "$line" >> "$output"
+            done <<< "$value"
+          }
+
+          write_package_lines() {
+            local value="$1"
+            local output="$2"
+            local package
+            : > "$output"
+            if [ "$INPUT_DEFAULT_PACKAGES" = "true" ]; then
+              printf '%s\n' termux-exec >> "$output"
+            fi
+            while IFS= read -r line || [ -n "$line" ]; do
+              line="${line%$'\r'}"
+              [ -n "$line" ] || continue
+              # shellcheck disable=SC2086
+              for package in $line; do
+                printf '%s\n' "$package" >> "$output"
+              done
+            done <<< "$value"
+            sort -u "$output" -o "$output"
+          }
+
+          write_env_exports() {
+            local value="$1"
+            local output="$2"
+            local line name env_value
+            : > "$output"
+            while IFS= read -r line || [ -n "$line" ]; do
+              line="${line%$'\r'}"
+              [ -n "$line" ] || continue
+              case "$line" in
+                \#*) continue ;;
+              esac
+              if [[ "$line" != *=* ]]; then
+                echo "Invalid env entry, expected KEY=value: $line" >&2
+                exit 1
+              fi
+              name="${line%%=*}"
+              env_value="${line#*=}"
+              if [[ ! "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+                echo "Invalid env variable name: $name" >&2
+                exit 1
+              fi
+              printf 'export %s=%q\n' "$name" "$env_value" >> "$output"
+            done <<< "$value"
+          }
+
+          validate_workspace_paths() {
+            local file="$1"
+            local path
+            while IFS= read -r path; do
+              [ -n "$path" ] || continue
+              case "$path" in
+                /*|..|../*|*/..|*/../*)
+                  echo "Workspace paths must be relative and stay inside the workspace: $path" >&2
+                  exit 1
+                  ;;
+              esac
+              if [ "$path" != "." ] && [ ! -e "${GITHUB_WORKSPACE}/${path}" ]; then
+                echo "Copy path does not exist in the GitHub workspace: $path" >&2
+                exit 1
+              fi
+            done < "$file"
+          }
+
+          validate_sync_paths() {
+            local file="$1"
+            local path
+            while IFS= read -r path; do
+              [ -n "$path" ] || continue
+              case "$path" in
+                .|/*|..|../*|*/..|*/../*)
+                  echo "Sync-back paths must be relative files or directories inside the workspace: $path" >&2
+                  exit 1
+                  ;;
+              esac
+            done < "$file"
+          }
+
+          write_options() {
+            local output="$1"
+
+            case "$INPUT_UPGRADE_SYSTEM" in
+              true|false) ;;
+              *)
+                echo "upgrade-system must be true or false: $INPUT_UPGRADE_SYSTEM" >&2
+                exit 1
+                ;;
+            esac
+            if [[ ! "$INPUT_PACMAN_TIMEOUT_MINUTES" =~ ^[1-9][0-9]*$ ]]; then
+              echo "pacman-timeout-minutes must be a positive integer: $INPUT_PACMAN_TIMEOUT_MINUTES" >&2
+              exit 1
+            fi
+
+            : > "$output"
+            printf 'export INPUT_UPGRADE_SYSTEM=%q\n' "$INPUT_UPGRADE_SYSTEM" >> "$output"
+            printf 'export INPUT_PACMAN_TIMEOUT_MINUTES=%q\n' "$INPUT_PACMAN_TIMEOUT_MINUTES" >> "$output"
+          }
+
+          write_package_lines "$INPUT_PACKAGES" "$run_dir/packages"
+          write_path_lines "$INPUT_COPY_PATHS" "$run_dir/copy-paths"
+          write_path_lines "$INPUT_EXCLUDE_PATHS" "$run_dir/exclude-paths"
+          write_path_lines "$INPUT_SYNC_BACK_PATHS" "$run_dir/sync-back-paths"
+          write_env_exports "$INPUT_ENV" "$run_dir/env.sh"
+          write_options "$run_dir/options.sh"
+
+          if [ ! -s "$run_dir/copy-paths" ]; then
+            printf '.\n' > "$run_dir/copy-paths"
+          fi
+          validate_workspace_paths "$run_dir/copy-paths"
+          validate_sync_paths "$run_dir/sync-back-paths"
+
+          if [[ -z "${INPUT_COMMANDS//[[:space:]]/}" ]]; then
+            echo "The commands input must not be empty." >&2
+            exit 1
+          fi
+          printf '%s\n' "$INPUT_COMMANDS" > "$run_dir/task.sh"
+          chmod 0644 "$run_dir"/*
+
+      - name: Run commands in Termux
+        env:
+          TERMUX_IMAGE: ${{ inputs['termux-image'] }}
+          TERMUX_RUN_DIR: ${{ runner.temp }}/termux-run
+          TERMUX_OUTPUT_DIR: ${{ runner.temp }}/termux-run-output
+          INPUT_UPGRADE_SYSTEM: ${{ inputs['upgrade-system'] }}
+          INPUT_PACMAN_TIMEOUT_MINUTES: ${{ inputs['pacman-timeout-minutes'] }}
+        run: |
+          set -Eeuo pipefail
+
+          docker run --rm -i \
+            -v "${GITHUB_WORKSPACE}:/workspace-src:ro" \
+            -v "${TERMUX_RUN_DIR}:/termux-run:ro" \
+            -v "${TERMUX_OUTPUT_DIR}:/workspace-output" \
+            "$TERMUX_IMAGE" \
+            bash -lc '
+              set -Eeuo pipefail
+
+              if [ -f /termux-run/env.sh ]; then
+                # shellcheck source=/dev/null
+                source /termux-run/env.sh
+              fi
+              # shellcheck source=/dev/null
+              source /termux-run/options.sh
+              export TERMUX_VERSION="${TERMUX_VERSION:-docker}"
+
+              run_pacman() {
+                timeout --foreground "${INPUT_PACMAN_TIMEOUT_MINUTES}m" pacman "$@"
+              }
+
+              if [ "$INPUT_UPGRADE_SYSTEM" = "true" ]; then
+                run_pacman -Syu --noconfirm
+              else
+                run_pacman -Sy --noconfirm
+              fi
+              if [ -s /termux-run/packages ]; then
+                TERMUX_PACKAGES="$(tr "\n" " " < /termux-run/packages)"
+                # shellcheck disable=SC2086
+                run_pacman -S --noconfirm --needed $TERMUX_PACKAGES
+              fi
+
+              termux_exec_preload="${PREFIX:-/data/data/com.termux/files/usr}/lib/libtermux-exec-ld-preload.so"
+              if [ -r "$termux_exec_preload" ]; then
+                export LD_PRELOAD="$termux_exec_preload"
+              fi
+
+              workdir="${PREFIX:-/data/data/com.termux/files/usr}/tmp/ci-workspace"
+              rm -rf "$workdir"
+              mkdir -p "$workdir"
+
+              mapfile -t copy_paths < /termux-run/copy-paths
+              exclude_args=()
+              while IFS= read -r pattern; do
+                [ -n "$pattern" ] || continue
+                exclude_args+=(--exclude="$pattern")
+              done < /termux-run/exclude-paths
+
+              (cd /workspace-src && tar "${exclude_args[@]}" -cf - -- "${copy_paths[@]}") |
+                (cd "$workdir" && tar -xf -)
+
+              chmod -R u+rwX "$workdir"
+              cd "$workdir"
+
+              bash /termux-run/task.sh
+
+              if [ -s /termux-run/sync-back-paths ]; then
+                while IFS= read -r path; do
+                  [ -n "$path" ] || continue
+                  if [ ! -e "$path" ]; then
+                    echo "Expected sync-back path was not created: $path" >&2
+                    exit 1
+                  fi
+                  mkdir -p "/workspace-output/$(dirname "$path")"
+                  cp -R -- "$path" "/workspace-output/$path"
+                  chmod -R a+rX "/workspace-output/$path"
+                done < /termux-run/sync-back-paths
+              fi
+            '
+
+      - name: Restore synced paths
+        if: ${{ inputs['sync-back-paths'] != '' }}
+        env:
+          INPUT_SYNC_BACK_PATHS: ${{ inputs['sync-back-paths'] }}
+          TERMUX_OUTPUT_DIR: ${{ runner.temp }}/termux-run-output
+        run: |
+          set -Eeuo pipefail
+
+          while IFS= read -r path || [ -n "$path" ]; do
+            path="${path%$'\r'}"
+            [ -n "$path" ] || continue
+            if [ ! -e "${TERMUX_OUTPUT_DIR}/${path}" ]; then
+              echo "Expected sync-back path was not restored from Termux: $path" >&2
+              exit 1
+            fi
+            mkdir -p "${GITHUB_WORKSPACE}/$(dirname "$path")"
+            rm -rf "${GITHUB_WORKSPACE:?}/${path}"
+            cp -R -- "${TERMUX_OUTPUT_DIR}/${path}" "${GITHUB_WORKSPACE}/${path}"
+            chmod -R u+rwX "${GITHUB_WORKSPACE}/${path}"
+          done <<< "$INPUT_SYNC_BACK_PATHS"
+
+      - name: Upload synced paths
+        if: ${{ inputs['upload-artifact-name'] != '' && inputs['sync-back-paths'] != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs['upload-artifact-name'] }}
+          path: ${{ inputs['sync-back-paths'] }}
+          if-no-files-found: error

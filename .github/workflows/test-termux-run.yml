@@ -1,0 +1,42 @@
+name: Test Termux Run
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/termux-run.yml'
+      - '.github/workflows/test-termux-run.yml'
+      - 'README.md'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  smoke:
+    name: Termux Run Smoke
+    uses: ./.github/workflows/termux-run.yml
+    with:
+      packages: |
+        ca-certificates
+      copy-paths: |
+        README.md
+      env: |
+        TERMUX_RUN_SMOKE=ok
+      commands: |
+        set -Eeuo pipefail
+
+        test "$TERMUX_RUN_SMOKE" = "ok"
+        command -v bash
+        command -v pacman
+        pacman -Q ca-certificates
+        test -f README.md
+
+        mkdir -p smoke-output
+        uname -m | tee smoke-output/arch.txt
+        printf 'termux smoke ok\n' > smoke-output/result.txt
+        chmod 600 smoke-output/result.txt
+      sync-back-paths: |
+        smoke-output/arch.txt
+        smoke-output/result.txt
+      upload-artifact-name: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'termux-run-smoke' || '' }}

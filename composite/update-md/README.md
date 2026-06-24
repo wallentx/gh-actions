@@ -2,18 +2,21 @@
 
 ## Description
 
-Automatically generates and updates a table of contents in README.md based on composite actions.
+Automatically generates and updates README.md indexes for reusable workflows and composite actions.
 
 ## Inputs
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
+| `workflow-dir` | Directory containing reusable workflows | No | `.github/workflows` |
 | `composite-dir` | Directory containing composite actions | No | `composite` |
 | `readme-path` | Path to the README.md file to update | No | `README.md` |
 
 ## Features
 
+- Automatically scans the reusable workflows directory for `workflow_call` workflows
 - Automatically scans the composite actions directory
+- Extracts reusable workflow summaries from `# Description:` comments
 - Extracts descriptions from each action's README.md (from `## Description` section)
 - Generates a file tree format with emojis (📂 for directories, 📄 for files)
 - Displays descriptions in italics under each action
@@ -32,7 +35,7 @@ steps:
     uses: wallentx/gh-actions/composite/update-md@main
 ```
 
-### Custom Directories
+### Explicit Paths
 
 ```yaml
 steps:
@@ -41,11 +44,26 @@ steps:
   - name: Update README index
     uses: wallentx/gh-actions/composite/update-md@main
     with:
-      composite-dir: 'actions'
-      readme-path: 'docs/README.md'
+      workflow-dir: '.github/workflows'
+      composite-dir: 'composite'
+      readme-path: 'README.md'
 ```
 
 ## Requirements
+
+Reusable workflows must use `workflow_call` and may include a top-level description comment:
+
+```yaml
+# Description: Run arbitrary commands in a reusable environment.
+name: Example Reusable Workflow
+
+on:
+  workflow_call:
+    inputs:
+      commands:
+        required: true
+        type: string
+```
 
 Each composite action's README.md must follow this format:
 
@@ -64,9 +82,14 @@ The script will extract the first line after the `## Description` heading to use
 
 ## Output Format
 
-The generated index will be formatted as a file tree with emojis:
+The generated indexes will be formatted as file trees with emojis:
 
 ```markdown
+## Reusable Workflows Index
+- 📂 __.github/workflows__
+   - 📄 [Example Reusable Workflow](./.github/workflows/example.yml)
+      - _Run arbitrary commands in a reusable environment._
+
 ## Composite Actions Index
 - 📂 __composite__
    - 📄 [Action Name](./composite/action-name/)

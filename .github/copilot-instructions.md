@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This repository contains reusable GitHub Actions composite actions that can be referenced from any GitHub Actions workflow in any repository. The primary goal is to provide standardized, well-documented, and maintainable composite actions that promote consistency across multiple projects.
+This repository contains reusable GitHub Actions workflows and composite actions that can be referenced from any GitHub Actions workflow in any repository. The primary goal is to provide standardized, well-documented, and maintainable automation that promotes consistency across multiple projects.
 
 **Key Principles:**
 - Consistency: Standardize workflows across all repositories
@@ -16,7 +16,10 @@ This repository contains reusable GitHub Actions composite actions that can be r
 .
 ├── .github/
 │   ├── workflows/
-│   │   └── update-readme.yml    # Auto-updates README index
+│   │   ├── termux-run.yml       # Public reusable workflow
+│   │   ├── termux-run.md        # Public reusable workflow docs
+│   │   ├── _test-*.yml          # Repo-internal test workflows
+│   │   └── _update-readme.yml   # Repo-internal README index updater
 │   └── copilot-instructions.md  # This file
 ├── composite/                    # All composite actions
 │   ├── checkout-and-cache/
@@ -133,7 +136,7 @@ When creating a new composite action:
 - Ensure documentation is complete and accurate
 
 ### Workflow Testing
-Create a test workflow in `.github/workflows/test-<action-name>.yml`:
+Create a repo-internal test workflow in `.github/workflows/_test-<action-name>.yml`:
 ```yaml
 name: Test Action Name
 on:
@@ -156,11 +159,12 @@ jobs:
 ## Automatic README Updates
 
 The main `README.md` is automatically updated when changes are pushed to the `main` branch. The update workflow:
+- Scans reusable workflows, excluding repo-internal `_*.yml` files
 - Scans all composite action directories
 - Extracts the title from each action's `README.md`
 - Extracts the description from the `## Description` section
-- Generates an index with links and quick usage examples
-- Preserves the structure and additional sections of the main README
+- Generates an index with links and descriptions only
+- Keeps detailed workflow usage docs in sibling markdown files such as `.github/workflows/termux-run.md`
 
 **Important**: Ensure your action's `README.md` follows the standard format with a proper `## Description` section for the automatic index to work correctly.
 

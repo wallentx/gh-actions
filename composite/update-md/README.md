@@ -14,14 +14,15 @@ Automatically generates and updates README.md indexes for reusable workflows and
 
 ## Features
 
-- Automatically scans the reusable workflows directory for `workflow_call` workflows
+- Automatically scans the reusable workflows directory for public `workflow_call` workflows
+- Skips repo-internal workflows whose filenames start with `_`
 - Automatically scans the composite actions directory
 - Extracts reusable workflow summaries from `# Description:` comments
+- Links reusable workflows to a sibling `.md` file when one exists
 - Extracts descriptions from each action's README.md (from `## Description` section)
 - Generates a file tree format with emojis (📂 for directories, 📄 for files)
 - Displays descriptions in italics under each action
-- Updates the main README.md with the generated content
-- Preserves documentation structure and formatting
+- Replaces the target README.md with an index-only document
 
 ## Usage
 
@@ -87,7 +88,7 @@ The generated indexes will be formatted as file trees with emojis:
 ```markdown
 ## Reusable Workflows Index
 - 📂 __.github/workflows__
-   - 📄 [Example Reusable Workflow](./.github/workflows/example.yml)
+   - 📄 [Example Reusable Workflow](./.github/workflows/example.md)
       - _Run arbitrary commands in a reusable environment._
 
 ## Composite Actions Index

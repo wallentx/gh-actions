@@ -5,7 +5,8 @@ on:
   pull_request:
     paths:
       - '.github/workflows/termux-run.yml'
-      - '.github/workflows/test-termux-run.yml'
+      - '.github/workflows/termux-run.md'
+      - '.github/workflows/_test-termux-run.yml'
       - 'README.md'
 
 permissions:

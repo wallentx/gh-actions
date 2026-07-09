@@ -462,7 +462,11 @@ set_version_env() {
                 GH_TAG_PRERELEASE="-${GH_PRERELEASE_TYPE}${BASH_REMATCH[1]}"
                 GH_TAG_SUFFIX="${BASH_REMATCH[2]:-}"
             else
-                GH_TAG_SUFFIX="$tag_remainder"
+                echo "Error: Latest tag '$GH_LATEST_TAG' starts with prerelease prefix '$prerelease_prefix' but does not include a numeric identifier." >&2
+                sEnv GH_TAG_PREFIX "" || sEnv GH_TAG_PREFIX ""
+                sEnv GH_TAG_SEMVER "" || sEnv GH_TAG_SEMVER ""
+                sEnv GH_TAG_SUFFIX "" || sEnv GH_TAG_SUFFIX ""
+                return 1
             fi
         else
             GH_TAG_SUFFIX="$tag_remainder"
@@ -536,7 +540,7 @@ set_version_env() {
             if (( num > latest_prerelease_num )); then
                 latest_prerelease_num="$num"
             fi
-        done < <(git tag --list 2>/dev/null || true)
+        done < <(git tag --list "${tag_prefix}*" 2>/dev/null || true)
 
         echo $((latest_prerelease_num + 1))
     }

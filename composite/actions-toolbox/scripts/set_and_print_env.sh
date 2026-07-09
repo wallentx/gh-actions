@@ -471,7 +471,7 @@ set_version_env() {
         else
             GH_TAG_SUFFIX="$tag_remainder"
         fi
-        if [[ -n "$GH_TAG_SUFFIX" && ! "$GH_TAG_SUFFIX" =~ ^-[A-Za-z0-9]+$ ]]; then
+        if [[ -n "$GH_TAG_SUFFIX" && ! "$GH_TAG_SUFFIX" =~ ^-[A-Za-z0-9][A-Za-z0-9.-]*$ ]]; then
             echo "Warning: Latest tag '$GH_LATEST_TAG' does not match the expected suffix format; skipping version increment metadata." >&2
             sEnv GH_TAG_PREFIX "" || true
             sEnv GH_TAG_SEMVER "" || true
@@ -521,6 +521,7 @@ set_version_env() {
         local tag
         local rest
         local num
+        local decimal_num
 
         if [[ -z "$GH_WORKTREE_ROOT" ]]; then
             echo 1
@@ -537,8 +538,9 @@ set_version_env() {
                 num="$rest"
             fi
             [[ "$num" =~ ^[0-9]+$ ]] || continue
-            if (( num > latest_prerelease_num )); then
-                latest_prerelease_num="$num"
+            decimal_num=$((10#$num))
+            if (( decimal_num > latest_prerelease_num )); then
+                latest_prerelease_num="$decimal_num"
             fi
         done < <(git tag --list "${tag_prefix}*" 2>/dev/null || true)
 

@@ -463,9 +463,9 @@ set_version_env() {
                 GH_TAG_SUFFIX="${BASH_REMATCH[2]:-}"
             else
                 echo "Warning: Latest tag '$GH_LATEST_TAG' starts with prerelease prefix '$prerelease_prefix' but does not include a numeric identifier; skipping version increment metadata." >&2
-                sEnv GH_TAG_PREFIX "" || sEnv GH_TAG_PREFIX ""
-                sEnv GH_TAG_SEMVER "" || sEnv GH_TAG_SEMVER ""
-                sEnv GH_TAG_SUFFIX "" || sEnv GH_TAG_SUFFIX ""
+                sEnv GH_TAG_PREFIX "" || true
+                sEnv GH_TAG_SEMVER "" || true
+                sEnv GH_TAG_SUFFIX "" || true
                 return 0
             fi
         else
@@ -473,17 +473,17 @@ set_version_env() {
         fi
         if [[ -n "$GH_TAG_SUFFIX" && ! "$GH_TAG_SUFFIX" =~ ^-[A-Za-z0-9]+$ ]]; then
             echo "Warning: Latest tag '$GH_LATEST_TAG' does not match the expected suffix format; skipping version increment metadata." >&2
-            sEnv GH_TAG_PREFIX "" || sEnv GH_TAG_PREFIX ""
-            sEnv GH_TAG_SEMVER "" || sEnv GH_TAG_SEMVER ""
-            sEnv GH_TAG_SUFFIX "" || sEnv GH_TAG_SUFFIX ""
+            sEnv GH_TAG_PREFIX "" || true
+            sEnv GH_TAG_SEMVER "" || true
+            sEnv GH_TAG_SUFFIX "" || true
             return 0
         fi
         GH_TAG_SEMVER="${MAJOR}.${MINOR}.${PATCH}"
     else
         echo "Warning: Latest tag '$GH_LATEST_TAG' does not match the expected format; skipping version increment metadata." >&2
-        sEnv GH_TAG_PREFIX "" || sEnv GH_TAG_PREFIX ""
-        sEnv GH_TAG_SEMVER "" || sEnv GH_TAG_SEMVER ""
-        sEnv GH_TAG_SUFFIX "" || sEnv GH_TAG_SUFFIX ""
+        sEnv GH_TAG_PREFIX "" || true
+        sEnv GH_TAG_SEMVER "" || true
+        sEnv GH_TAG_SUFFIX "" || true
         return 0
     fi
     # Validate that MAJOR, MINOR, and PATCH are integers

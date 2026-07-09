@@ -443,6 +443,37 @@ set_version_env() {
         GH_PRERELEASE_TYPE="rc"
     fi
 
+    set_version_env_value() {
+        local var_name="$1"
+        local var_value="${2-}"
+
+        if [[ -n "$var_value" ]]; then
+            sEnv "$var_name" "$var_value" || sEnv "$var_name" "" || true
+        else
+            sEnv "$var_name" "" || true
+        fi
+    }
+
+    set_version_metadata_env() {
+        set_version_env_value GH_LATEST_TAG "${GH_LATEST_TAG:-}"
+        set_version_env_value GH_LATEST_TAG_SHA "${GH_LATEST_TAG_SHA:-}"
+        set_version_env_value GH_LATEST_RELEASE_TAG "${GH_LATEST_RELEASE_TAG:-}"
+        set_version_env_value GH_LATEST_RELEASE_TAG_SHA "${GH_LATEST_RELEASE_TAG_SHA:-}"
+        set_version_env_value GH_NEXT_MAJOR "${GH_NEXT_MAJOR:-}"
+        set_version_env_value GH_NEXT_MINOR "${GH_NEXT_MINOR:-}"
+        set_version_env_value GH_NEXT_PATCH "${GH_NEXT_PATCH:-}"
+        set_version_env_value GH_NEXT_MAJOR_PRERELEASE "${GH_NEXT_MAJOR_PRERELEASE:-}"
+        set_version_env_value GH_NEXT_MINOR_PRERELEASE "${GH_NEXT_MINOR_PRERELEASE:-}"
+        set_version_env_value GH_NEXT_PATCH_PRERELEASE "${GH_NEXT_PATCH_PRERELEASE:-}"
+        set_version_env_value GH_NEXT_MAJOR_PRERELEASE_NUM "${GH_NEXT_MAJOR_PRERELEASE_NUM:-}"
+        set_version_env_value GH_NEXT_MINOR_PRERELEASE_NUM "${GH_NEXT_MINOR_PRERELEASE_NUM:-}"
+        set_version_env_value GH_NEXT_PATCH_PRERELEASE_NUM "${GH_NEXT_PATCH_PRERELEASE_NUM:-}"
+        set_version_env_value GH_TAG_PREFIX "${GH_TAG_PREFIX:-}"
+        set_version_env_value GH_TAG_SEMVER "${GH_TAG_SEMVER:-}"
+        set_version_env_value GH_TAG_SUFFIX "${GH_TAG_SUFFIX:-}"
+        set_version_env_value GH_PRERELEASE_TYPE "${GH_PRERELEASE_TYPE:-}"
+    }
+
     # Extract prefix, version, and suffix
     if [[ -z "$GH_LATEST_TAG" ]]; then
         MAJOR=0
@@ -463,9 +494,10 @@ set_version_env() {
                 GH_TAG_SUFFIX="${BASH_REMATCH[2]:-}"
             else
                 echo "Warning: Latest tag '$GH_LATEST_TAG' starts with prerelease prefix '$prerelease_prefix' but does not include a numeric identifier; skipping version increment metadata." >&2
-                sEnv GH_TAG_PREFIX "" || true
-                sEnv GH_TAG_SEMVER "" || true
-                sEnv GH_TAG_SUFFIX "" || true
+                GH_TAG_PREFIX=""
+                GH_TAG_SEMVER=""
+                GH_TAG_SUFFIX=""
+                set_version_metadata_env
                 return 0
             fi
         else
@@ -473,17 +505,19 @@ set_version_env() {
         fi
         if [[ -n "$GH_TAG_SUFFIX" && ! "$GH_TAG_SUFFIX" =~ ^-[A-Za-z0-9][A-Za-z0-9.-]*$ ]]; then
             echo "Warning: Latest tag '$GH_LATEST_TAG' does not match the expected suffix format; skipping version increment metadata." >&2
-            sEnv GH_TAG_PREFIX "" || true
-            sEnv GH_TAG_SEMVER "" || true
-            sEnv GH_TAG_SUFFIX "" || true
+            GH_TAG_PREFIX=""
+            GH_TAG_SEMVER=""
+            GH_TAG_SUFFIX=""
+            set_version_metadata_env
             return 0
         fi
         GH_TAG_SEMVER="${MAJOR}.${MINOR}.${PATCH}"
     else
         echo "Warning: Latest tag '$GH_LATEST_TAG' does not match the expected format; skipping version increment metadata." >&2
-        sEnv GH_TAG_PREFIX "" || true
-        sEnv GH_TAG_SEMVER "" || true
-        sEnv GH_TAG_SUFFIX "" || true
+        GH_TAG_PREFIX=""
+        GH_TAG_SEMVER=""
+        GH_TAG_SUFFIX=""
+        set_version_metadata_env
         return 0
     fi
     # Validate that MAJOR, MINOR, and PATCH are integers
@@ -556,23 +590,7 @@ set_version_env() {
     GH_NEXT_PATCH_PRERELEASE="${GH_TAG_PREFIX}${NEXT_PATCH_VERSION}-${GH_PRERELEASE_TYPE}${GH_NEXT_PATCH_PRERELEASE_NUM}${GH_TAG_SUFFIX}"
 
     # Set the environment variables
-    sEnv GH_LATEST_TAG "$GH_LATEST_TAG" || sEnv GH_LATEST_TAG ""
-    sEnv GH_LATEST_TAG_SHA "$GH_LATEST_TAG_SHA" || sEnv GH_LATEST_TAG_SHA ""
-    sEnv GH_LATEST_RELEASE_TAG "$GH_LATEST_RELEASE_TAG" || sEnv GH_LATEST_RELEASE_TAG ""
-    sEnv GH_LATEST_RELEASE_TAG_SHA "$GH_LATEST_RELEASE_TAG_SHA" || sEnv GH_LATEST_RELEASE_TAG_SHA ""
-    sEnv GH_NEXT_MAJOR "$GH_NEXT_MAJOR" || sEnv GH_NEXT_MAJOR ""
-    sEnv GH_NEXT_MINOR "$GH_NEXT_MINOR" || sEnv GH_NEXT_MINOR ""
-    sEnv GH_NEXT_PATCH "$GH_NEXT_PATCH" || sEnv GH_NEXT_PATCH ""
-    sEnv GH_NEXT_MAJOR_PRERELEASE "$GH_NEXT_MAJOR_PRERELEASE" || sEnv GH_NEXT_MAJOR_PRERELEASE ""
-    sEnv GH_NEXT_MINOR_PRERELEASE "$GH_NEXT_MINOR_PRERELEASE" || sEnv GH_NEXT_MINOR_PRERELEASE ""
-    sEnv GH_NEXT_PATCH_PRERELEASE "$GH_NEXT_PATCH_PRERELEASE" || sEnv GH_NEXT_PATCH_PRERELEASE ""
-    sEnv GH_NEXT_MAJOR_PRERELEASE_NUM "$GH_NEXT_MAJOR_PRERELEASE_NUM" || sEnv GH_NEXT_MAJOR_PRERELEASE_NUM ""
-    sEnv GH_NEXT_MINOR_PRERELEASE_NUM "$GH_NEXT_MINOR_PRERELEASE_NUM" || sEnv GH_NEXT_MINOR_PRERELEASE_NUM ""
-    sEnv GH_NEXT_PATCH_PRERELEASE_NUM "$GH_NEXT_PATCH_PRERELEASE_NUM" || sEnv GH_NEXT_PATCH_PRERELEASE_NUM ""
-    sEnv GH_TAG_PREFIX "$GH_TAG_PREFIX" || sEnv GH_TAG_PREFIX ""
-    sEnv GH_TAG_SEMVER "$GH_TAG_SEMVER" || sEnv GH_TAG_SEMVER ""
-    sEnv GH_TAG_SUFFIX "$GH_TAG_SUFFIX" || sEnv GH_TAG_SUFFIX ""
-    sEnv GH_PRERELEASE_TYPE "$GH_PRERELEASE_TYPE" || sEnv GH_PRERELEASE_TYPE ""
+    set_version_metadata_env
 }
 
 # -----------------------------

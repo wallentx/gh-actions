@@ -462,29 +462,29 @@ set_version_env() {
                 GH_TAG_PRERELEASE="-${GH_PRERELEASE_TYPE}${BASH_REMATCH[1]}"
                 GH_TAG_SUFFIX="${BASH_REMATCH[2]:-}"
             else
-                echo "Error: Latest tag '$GH_LATEST_TAG' starts with prerelease prefix '$prerelease_prefix' but does not include a numeric identifier." >&2
+                echo "Warning: Latest tag '$GH_LATEST_TAG' starts with prerelease prefix '$prerelease_prefix' but does not include a numeric identifier; skipping version increment metadata." >&2
                 sEnv GH_TAG_PREFIX "" || sEnv GH_TAG_PREFIX ""
                 sEnv GH_TAG_SEMVER "" || sEnv GH_TAG_SEMVER ""
                 sEnv GH_TAG_SUFFIX "" || sEnv GH_TAG_SUFFIX ""
-                return 1
+                return 0
             fi
         else
             GH_TAG_SUFFIX="$tag_remainder"
         fi
         if [[ -n "$GH_TAG_SUFFIX" && ! "$GH_TAG_SUFFIX" =~ ^-[A-Za-z0-9]+$ ]]; then
-            echo "Error: Latest tag '$GH_LATEST_TAG' does not match the expected suffix format." >&2
+            echo "Warning: Latest tag '$GH_LATEST_TAG' does not match the expected suffix format; skipping version increment metadata." >&2
             sEnv GH_TAG_PREFIX "" || sEnv GH_TAG_PREFIX ""
             sEnv GH_TAG_SEMVER "" || sEnv GH_TAG_SEMVER ""
             sEnv GH_TAG_SUFFIX "" || sEnv GH_TAG_SUFFIX ""
-            return
+            return 0
         fi
         GH_TAG_SEMVER="${MAJOR}.${MINOR}.${PATCH}"
     else
-        echo "Error: Latest tag '$GH_LATEST_TAG' does not match the expected format." >&2
+        echo "Warning: Latest tag '$GH_LATEST_TAG' does not match the expected format; skipping version increment metadata." >&2
         sEnv GH_TAG_PREFIX "" || sEnv GH_TAG_PREFIX ""
         sEnv GH_TAG_SEMVER "" || sEnv GH_TAG_SEMVER ""
         sEnv GH_TAG_SUFFIX "" || sEnv GH_TAG_SUFFIX ""
-        return
+        return 0
     fi
     # Validate that MAJOR, MINOR, and PATCH are integers
     if ! [[ "$MAJOR" =~ ^[0-9]+$ && "$MINOR" =~ ^[0-9]+$ && "$PATCH" =~ ^[0-9]+$ ]]; then

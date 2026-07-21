@@ -71,7 +71,7 @@ Public workflows that other repositories call via `uses: wallentx/gh-actions/.gi
 Workflows designed to be required by repository or organization rulesets ("Require workflows to pass before merging").
 
 - Name them `ruleset-<purpose>.yml`, with sibling `ruleset-<purpose>.md`.
-- Trigger on `pull_request` **and** `merge_group` — required workflows only run on `pull_request`/`pull_request_target`/`merge_group` events, and without `merge_group` any repo using a merge queue stalls at "Expected". Also declare `workflow_call:` so repositories outside the ruleset can call the same checks directly — and because only `workflow_call` workflows are picked up by the README indexer.
+- Trigger on `pull_request` **and** `merge_group` — required workflows only support `pull_request`, `pull_request_target`, and `merge_group`, and without `merge_group` any repo using a merge queue stalls at "Expected". Do not declare `workflow_call`; it is not a supported ruleset-workflow trigger. The README indexer recognizes the `ruleset-` filename prefix directly.
 - Rulesets **ignore all event filters** (`paths`, `branches`, `types`) and run the workflow on every PR in every targeted repo. Do path/content filtering inside the workflow, with a fast short-circuit to success.
 - Ruleset workflows execute in each **target repository's** context with that repo's code checked out. Default to `permissions: contents: read` and no secrets (org-level secrets only if unavoidable, consumed before any repo-controlled code runs). Never combine `pull_request_target` with checking out PR head code.
 - Do not rely on `concurrency: cancel-in-progress` — it is not honored for ruleset-required runs.
@@ -300,9 +300,15 @@ The main `README.md` is automatically updated when changes are pushed to the `ma
 - Generates an index with links and descriptions only
 - Keeps detailed workflow usage docs in sibling markdown files (e.g. `.github/workflows/<workflow-name>.md`)
 
+### Generated-file rule
+
+`README.md` is generated output. Never edit or regenerate it during feature, fix, documentation, or pull-request work. To change its structure, headings, selection rules, formatting, or other generated content, edit [composite/update-md/action.yml](composite/update-md/action.yml). The `_update-readme.yml` workflow regenerates and commits `README.md` after source changes reach `main`.
+
+Artifact descriptions belong in their source documentation: workflow descriptions in the YAML `# Description:` comment and sibling `.md` file, and composite descriptions in the action's `README.md`. Do not copy those changes into the root `README.md` manually.
+
 ### How the indexer extracts titles and descriptions
 
-- **Workflows**: every `.github/workflows/*.yml` without an underscore prefix that contains a `workflow_call:` trigger. Title = the `name:` field; description = the first-line `# Description:` comment; link = the sibling `.md` doc when it exists, otherwise the YAML file.
+- **Workflows**: every `.github/workflows/*.yml` without an underscore prefix that either contains a `workflow_call:` trigger or uses the `ruleset-` filename prefix. Title = the `name:` field; description = the first-line `# Description:` comment; link = the sibling `.md` doc when it exists, otherwise the YAML file.
 - **Composite actions**: every `composite/*/` directory containing a `README.md`. Title = the first `# ` H1; description = the **first non-blank line** after the `## Description` heading.
 
 ### Description rules
@@ -314,7 +320,7 @@ These apply to composite `## Description` sections and workflow `# Description:`
 - Plain prose: no headings, lists, images, or line breaks (inline links and a leading emoji are fine).
 - Start with a verb or the artifact's role ("Runs ShellCheck…", "Deploys Grafana dashboards…", "A composite action that…") and end with a period.
 
-**Important**: a missing `## Description` section (composite) or `# Description:` comment (workflow) produces an index entry with no description, and a missing `README.md` or `workflow_call:` trigger omits the artifact entirely. When adding or renaming an artifact, confirm it will be indexed correctly — the conventions in [Placement, Naming, and Documentation Standards](#placement-naming-and-documentation-standards) are exactly what the indexer expects.
+**Important**: a missing `## Description` section (composite) or `# Description:` comment (workflow) produces an index entry with no description. A missing `README.md` omits a composite; a public workflow without either `workflow_call:` or a `ruleset-` filename is also omitted. When adding or renaming an artifact, confirm it will be indexed correctly — the conventions in [Placement, Naming, and Documentation Standards](#placement-naming-and-documentation-standards) are exactly what the indexer expects.
 
 ## Version Pinning
 

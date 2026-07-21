@@ -14,7 +14,7 @@ Automatically generates and updates README.md indexes for reusable workflows and
 
 ## Features
 
-- Automatically scans the reusable workflows directory for public `workflow_call` workflows
+- Automatically scans for public `workflow_call` workflows and `ruleset-*.yml` ruleset workflows
 - Skips repo-internal workflows whose filenames start with `_`
 - Automatically scans the composite actions directory
 - Extracts reusable workflow summaries from `# Description:` comments
@@ -52,7 +52,7 @@ steps:
 
 ## Requirements
 
-Reusable workflows must use `workflow_call` and may include a top-level description comment:
+Reusable workflows must use `workflow_call`. Ruleset-required workflows must use a `ruleset-` filename and GitHub-supported ruleset triggers such as `pull_request` and `merge_group`. Both may include a top-level description comment.
 
 ```yaml
 # Description: Run arbitrary commands in a reusable environment.
@@ -86,7 +86,7 @@ The script will extract the first line after the `## Description` heading to use
 The generated indexes will be formatted as file trees with emojis:
 
 ```markdown
-## Reusable Workflows Index
+## Workflows Index
 - 📂 __.github/workflows__
    - 📄 [Example Reusable Workflow](./.github/workflows/example.md)
       - _Run arbitrary commands in a reusable environment._

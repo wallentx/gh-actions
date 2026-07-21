@@ -73,15 +73,20 @@ runs:
         echo "$README_TOP" > "$README_PATH"
         echo "" >> "$README_PATH"
 
-        # Find reusable workflows with workflow_call triggers.
+        # Find reusable workflows and ruleset-required workflows.
         if [ -d "$WORKFLOW_DIR" ]; then
           reusable_count=0
           reusable_entries="$(mktemp "$TEMP_ROOT/update-md-reusable.XXXXXX")"
 
           while IFS= read -r workflow_file; do
-            if ! grep -Eq '^[[:space:]]*workflow_call:' "$workflow_file"; then
-              continue
-            fi
+            case "$(basename "$workflow_file")" in
+              ruleset-*.yml) ;;
+              *)
+                if ! grep -Eq '^[[:space:]]*workflow_call:' "$workflow_file"; then
+                  continue
+                fi
+                ;;
+            esac
 
             workflow_name="$(
               sed -n 's/^name:[[:space:]]*//p' "$workflow_file" |
@@ -114,7 +119,7 @@ runs:
 
           if [ "$reusable_count" -gt 0 ]; then
             {
-              echo "## Reusable Workflows Index"
+              echo "## Workflows Index"
               echo "- 📂 __${INPUT_WORKFLOW_DIR}__"
               cat "$reusable_entries"
               echo ""

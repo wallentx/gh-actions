@@ -1,4 +1,4 @@
-# Description: Waits for every other check on a pull request to finish, then succeeds only when all checks pass.
+# Description: Waits for every other pull request or merge-group check, then succeeds when each passes or is skipped.
 name: All PR checks must pass
 
 on:
@@ -7,6 +7,7 @@ on:
 
 permissions:
   checks: read
+  contents: read
   pull-requests: read
   statuses: read
 
@@ -17,12 +18,5 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - name: Require all pull request checks
-        if: github.event_name == 'pull_request'
+      - name: Require all checks
         uses: wallentx/gh-actions/composite/require-all-checks@main
-
-      - name: Allow merge group evaluation
-        if: github.event_name == 'merge_group'
-        shell: bash
-        run: |
-          echo 'Pull request checks were evaluated before the pull request entered the merge queue.'

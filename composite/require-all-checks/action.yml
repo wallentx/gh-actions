@@ -1,5 +1,5 @@
 name: 'Require all PR checks'
-description: 'Waits until every other check on a pull request finishes, then succeeds only when all checks pass.'
+description: 'Waits for every other pull request or merge-group check, then succeeds when each passes or is skipped.'
 
 inputs:
   poll-seconds:
@@ -14,12 +14,14 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Wait for all other PR checks
+    - name: Wait for all other checks
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
         GH_REPO: ${{ github.repository }}
+        EVENT_NAME: ${{ github.event_name }}
         PR: ${{ github.event.number }}
+        CHECK_REF: ${{ github.sha }}
         POLL_SECONDS: ${{ inputs.poll-seconds }}
         QUIET_SECONDS: ${{ inputs.quiet-seconds }}
       run: |

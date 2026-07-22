@@ -17,8 +17,8 @@ Automatically generates and updates README.md indexes for reusable workflows and
 - Automatically scans for public `workflow_call` workflows and `ruleset-*.yml` ruleset workflows
 - Skips repo-internal workflows whose filenames start with `_`
 - Automatically scans the composite actions directory
-- Extracts reusable workflow summaries from `# Description:` comments
-- Links reusable workflows to a sibling `.md` file when one exists
+- Extracts workflow summaries from `# Description:` comments
+- Links workflows to a sibling `.md` file when one exists
 - Extracts descriptions from each action's README.md (from `## Description` section)
 - Generates a file tree format with emojis (📂 for directories, 📄 for files)
 - Displays descriptions in italics under each action

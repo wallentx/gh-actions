@@ -2,14 +2,14 @@
 
 ## Description
 
-Waits until every other check on a pull request finishes, then succeeds only when all checks pass.
+Waits for every other pull request or merge-group check, then succeeds when each passes or is skipped.
 
 ## Inputs
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
 | `poll-seconds` | Seconds between check queries | No | `10` |
-| `quiet-seconds` | Seconds the set of check links must remain unchanged before evaluation | No | `30` |
+| `quiet-seconds` | Seconds the set of check identifiers must remain unchanged before evaluation | No | `30` |
 
 ## Outputs
 
@@ -20,6 +20,7 @@ This action has no outputs.
 ```yaml
 permissions:
   checks: read
+  contents: read
   pull-requests: read
   statuses: read
 
@@ -34,8 +35,8 @@ jobs:
 
 ## How It Works
 
-The action polls `gh pr checks`, ignores checks from its own workflow run, and waits until the remaining set of check links has stayed unchanged for `quiet-seconds`. It then succeeds only when no check is pending and every remaining check is passing or skipped. Failed, cancelled, or otherwise unsuccessful checks fail the action.
+For `pull_request` events, the action polls `gh pr checks`. For `merge_group` events, it queries the target commit's complete status rollup, including check runs and commit statuses. Both paths ignore checks from the action's own workflow run and wait until the remaining check set has stayed unchanged for `quiet-seconds`. The action succeeds only when no check is pending and every remaining check is passing, skipped, or neutral. Failed, cancelled, or otherwise unsuccessful checks fail the action.
 
-Run exactly one all-checks gate for each pull request. Two gates in separate workflow runs see each other as pending and wait until their job timeouts.
+Run exactly one all-checks gate for each pull request or merge group. Two gates in separate workflow runs see each other as pending and wait until their job timeouts.
 
-The action requires a `pull_request` event and the GitHub CLI available on the runner. It uses the job's `github.token`; grant that token `checks: read`, `pull-requests: read`, and `statuses: read`.
+The action requires a `pull_request` or `merge_group` event with the GitHub CLI and `jq` available on the runner. It uses the job's `github.token`; grant that token `checks: read`, `contents: read`, `pull-requests: read`, and `statuses: read`.

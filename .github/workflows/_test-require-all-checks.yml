@@ -33,6 +33,36 @@ jobs:
         env:
           MOCK_CHECK_RESULT: 'pass'
 
+      - name: Accept passing merge group checks
+        shell: bash
+        env:
+          CHECK_REF: 'test-merge-group-sha'
+          EVENT_NAME: 'merge_group'
+          GH_REPO: 'example/repo'
+          GH_TOKEN: 'test-token'
+          MOCK_CHECK_RESULT: 'pass'
+          POLL_SECONDS: '1'
+          PR: ''
+          QUIET_SECONDS: '0'
+        run: |
+          composite/require-all-checks/scripts/require-all-checks.sh
+
+      - name: Reject failed merge group checks
+        id: failed-merge-checks
+        continue-on-error: true
+        shell: bash
+        env:
+          CHECK_REF: 'test-merge-group-sha'
+          EVENT_NAME: 'merge_group'
+          GH_REPO: 'example/repo'
+          GH_TOKEN: 'test-token'
+          MOCK_CHECK_RESULT: 'fail'
+          POLL_SECONDS: '1'
+          PR: ''
+          QUIET_SECONDS: '0'
+        run: |
+          composite/require-all-checks/scripts/require-all-checks.sh
+
       - name: Reject failed checks
         id: failed-checks
         continue-on-error: true
@@ -58,7 +88,9 @@ jobs:
         shell: bash
         env:
           FAILED_CHECKS_OUTCOME: ${{ steps.failed-checks.outcome }}
+          FAILED_MERGE_CHECKS_OUTCOME: ${{ steps.failed-merge-checks.outcome }}
           INVALID_INPUT_OUTCOME: ${{ steps.invalid-input.outcome }}
         run: |
           test "$FAILED_CHECKS_OUTCOME" = 'failure'
+          test "$FAILED_MERGE_CHECKS_OUTCOME" = 'failure'
           test "$INVALID_INPUT_OUTCOME" = 'failure'

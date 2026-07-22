@@ -1,0 +1,22 @@
+# Description: Waits for every other pull request or merge-group check, then succeeds when each passes or is skipped.
+name: All PR checks must pass
+
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  checks: read
+  contents: read
+  pull-requests: read
+  statuses: read
+
+jobs:
+  all-checks:
+    name: All PR checks passed
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Require all checks
+        uses: wallentx/gh-actions/composite/require-all-checks@main

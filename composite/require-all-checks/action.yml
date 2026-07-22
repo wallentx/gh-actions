@@ -1,0 +1,28 @@
+name: 'Require all PR checks'
+description: 'Waits for every other pull request or merge-group check, then succeeds when each passes or is skipped.'
+
+inputs:
+  poll-seconds:
+    description: 'Seconds between check queries'
+    required: false
+    default: '10'
+  quiet-seconds:
+    description: 'How long the set of checks must remain unchanged'
+    required: false
+    default: '30'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Wait for all other checks
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        EVENT_NAME: ${{ github.event_name }}
+        PR: ${{ github.event.number }}
+        CHECK_REF: ${{ github.sha }}
+        POLL_SECONDS: ${{ inputs.poll-seconds }}
+        QUIET_SECONDS: ${{ inputs.quiet-seconds }}
+      run: |
+        "${GITHUB_ACTION_PATH}/scripts/require-all-checks.sh"

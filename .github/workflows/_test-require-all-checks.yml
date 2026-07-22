@@ -1,0 +1,96 @@
+# Description: Tests the Require all PR checks composite action with deterministic GitHub CLI responses.
+name: Test Require all PR checks
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/_test-require-all-checks.yml'
+      - 'composite/require-all-checks/**'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install mock GitHub CLI
+        shell: bash
+        run: |
+          mkdir -p "${RUNNER_TEMP}/mock-bin"
+          cp composite/require-all-checks/tests/mock-gh.sh "${RUNNER_TEMP}/mock-bin/gh"
+          chmod +x "${RUNNER_TEMP}/mock-bin/gh"
+          echo "${RUNNER_TEMP}/mock-bin" >> "$GITHUB_PATH"
+
+      - name: Accept passing checks
+        uses: ./composite/require-all-checks
+        with:
+          poll-seconds: '1'
+          quiet-seconds: '0'
+        env:
+          MOCK_CHECK_RESULT: 'pass'
+
+      - name: Accept passing merge group checks
+        shell: bash
+        env:
+          CHECK_REF: 'test-merge-group-sha'
+          EVENT_NAME: 'merge_group'
+          GH_REPO: 'example/repo'
+          GH_TOKEN: 'test-token'
+          MOCK_CHECK_RESULT: 'pass'
+          POLL_SECONDS: '1'
+          PR: ''
+          QUIET_SECONDS: '0'
+        run: |
+          composite/require-all-checks/scripts/require-all-checks.sh
+
+      - name: Reject failed merge group checks
+        id: failed-merge-checks
+        continue-on-error: true
+        shell: bash
+        env:
+          CHECK_REF: 'test-merge-group-sha'
+          EVENT_NAME: 'merge_group'
+          GH_REPO: 'example/repo'
+          GH_TOKEN: 'test-token'
+          MOCK_CHECK_RESULT: 'fail'
+          POLL_SECONDS: '1'
+          PR: ''
+          QUIET_SECONDS: '0'
+        run: |
+          composite/require-all-checks/scripts/require-all-checks.sh
+
+      - name: Reject failed checks
+        id: failed-checks
+        continue-on-error: true
+        uses: ./composite/require-all-checks
+        with:
+          poll-seconds: '1'
+          quiet-seconds: '0'
+        env:
+          MOCK_CHECK_RESULT: 'fail'
+
+      - name: Reject invalid polling interval
+        id: invalid-input
+        continue-on-error: true
+        uses: ./composite/require-all-checks
+        with:
+          poll-seconds: '0'
+          quiet-seconds: '0'
+        env:
+          MOCK_CHECK_RESULT: 'pass'
+
+      - name: Verify rejected cases
+        if: always()
+        shell: bash
+        env:
+          FAILED_CHECKS_OUTCOME: ${{ steps.failed-checks.outcome }}
+          FAILED_MERGE_CHECKS_OUTCOME: ${{ steps.failed-merge-checks.outcome }}
+          INVALID_INPUT_OUTCOME: ${{ steps.invalid-input.outcome }}
+        run: |
+          test "$FAILED_CHECKS_OUTCOME" = 'failure'
+          test "$FAILED_MERGE_CHECKS_OUTCOME" = 'failure'
+          test "$INVALID_INPUT_OUTCOME" = 'failure'

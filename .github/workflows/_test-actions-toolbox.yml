@@ -14,6 +14,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Test GitHub release artifact discovery
+        run: bash composite/actions-toolbox/tests/test_release_installer.sh
+
       - name: 🧰 Actions Toolbox (vanilla)
         uses: ./composite/actions-toolbox
         with:

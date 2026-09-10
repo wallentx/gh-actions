@@ -17,7 +17,9 @@ inputs:
   include-packages:
     description: >-
       Additional packages to install. Supports package versions and
-      command-to-package mapping. See action.md for details.
+      command-to-package mapping. Tools not available from system package
+      managers are installed from their GitHub releases when specified as
+      [command:]owner/repo[=version]. See README.md for details.
     required: false
     default: ""
 

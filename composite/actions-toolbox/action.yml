@@ -22,10 +22,25 @@ inputs:
       [command:]owner/repo[=version]. See README.md for details.
     required: false
     default: ""
+  marker-mode:
+    description: >-
+      Control metadata snapshot reuse. Accepted values are auto, refresh, and
+      bypass.
+    required: false
+    default: "auto"
 
 runs:
   using: "composite"
   steps:
+    - name: Plan metadata snapshot
+      id: metadata-plan
+      shell: bash
+      env:
+        INPUT_MARKER_MODE: ${{ inputs.marker-mode }}
+        INPUT_CHECKOUT: ${{ inputs.checkout }}
+      run: |
+        "${GITHUB_ACTION_PATH}/scripts/plan_metadata_snapshot.sh"
+
     - name: Set Verbose Environment Variable
       continue-on-error: true
       shell: bash
@@ -63,10 +78,12 @@ runs:
         RUNNER_TEMP: ${{ runner.temp }}
         RUNNER_TOOL_CACHE: ${{ runner.tool_cache }}
         RUNNER_VERBOSE: ${{ env.RUNNER_VERBOSE }}
+        INPUT_INCLUDE_PACKAGES: ${{ inputs.include-packages }}
       run: |
         "$Env:GITHUB_ACTION_PATH\scripts\check_dependencies_windows.ps1"
 
     - name: Identify Runner Hardware (Linux/MacOS)
+      if: steps.metadata-plan.outputs.run-snapshot == 'true'
       continue-on-error: true
       shell: bash
       env:
@@ -81,13 +98,14 @@ runs:
         "${GITHUB_ACTION_PATH}/scripts/identify_runner_hardware_unix.sh"
 
     - name: Identify Runner Hardware (Windows)
-      if: runner.os == 'Windows'
+      if: runner.os == 'Windows' && steps.metadata-plan.outputs.run-snapshot == 'true'
       continue-on-error: true
       shell: powershell
       run: |
         "$Env:GITHUB_ACTION_PATH\scripts\identify_runner_hardware_windows.ps1"
 
     - name: Dump contexts
+      if: steps.metadata-plan.outputs.run-snapshot == 'true'
       continue-on-error: true
       env:
         GITHUB_CONTEXT: ${{ toJson(github) }}
@@ -108,15 +126,19 @@ runs:
         "${GITHUB_ACTION_PATH}/scripts/dump_contexts.sh"
 
     - name: Catch Payload
+      if: steps.metadata-plan.outputs.run-snapshot == 'true'
       continue-on-error: true
       shell: bash
       run: |
         jq '.' "$GITHUB_EVENT_PATH" | yq -pj -oy -C -P
 
     - name: Set & Print ENV
+      id: metadata-snapshot
+      if: steps.metadata-plan.outputs.run-snapshot == 'true'
       continue-on-error: true
       shell: bash
       run: |
+        set -o pipefail
         injected_env_names="$(mktemp)"
         trap 'rm -f "$injected_env_names"' EXIT
         env_command_dir="$(dirname "$GITHUB_ENV")"
@@ -158,3 +180,9 @@ runs:
         echo "――――――――――――――――――――――"
         echo "Complete"
         echo "――――――――――――――――――――――"
+
+    - name: Mark metadata snapshot complete
+      if: steps.metadata-plan.outputs.write-marker == 'true' && steps.metadata-snapshot.outcome == 'success'
+      shell: bash
+      run: |
+        "${GITHUB_ACTION_PATH}/scripts/plan_metadata_snapshot.sh" write-marker

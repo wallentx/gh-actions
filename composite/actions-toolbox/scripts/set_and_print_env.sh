@@ -158,6 +158,27 @@ event_range_head_sha() {
     jq -r '.pull_request.head.sha // .merge_group.head_sha // .after // env.GITHUB_SHA' "$GITHUB_EVENT_PATH"
 }
 
+event_pr_number() {
+    local event_name="${GITHUB_EVENT_NAME:-}"
+    local pr_number=""
+
+    case "$event_name" in
+        pull_request | pull_request_target)
+            jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH"
+            ;;
+        issue_comment)
+            jq -r 'if .issue.pull_request != null then (.issue.number // empty) else empty end' \
+              "$GITHUB_EVENT_PATH"
+            ;;
+        merge_group)
+            if [[ "${GITHUB_REF_NAME:-}" =~ ^.*pr-([0-9]+)- ]]; then
+                pr_number="${BASH_REMATCH[1]}"
+            fi
+            printf '%s\n' "$pr_number"
+            ;;
+    esac
+}
+
 set_changed_file_env_raw() {
     local var_name="$1"
     local var_value="$2"
@@ -173,12 +194,13 @@ set_changed_file_env_raw() {
 
 # Category: Basic Repository Info
 set_basic_repository_env() {
+    local repo_name="${GITHUB_REPOSITORY#*/}"
     # Set REPO
-    sEnv REPO "$(echo "$GITHUB_REPOSITORY" | cut -d '/' -f2)" || sEnv REPO ""
+    sEnv REPO "$repo_name" || sEnv REPO ""
     # Set GH_REPO_NAME (same as REPO)
-    sEnv GH_REPO_NAME "$REPO" || sEnv GH_REPO_NAME ""
+    sEnv GH_REPO_NAME "$repo_name" || sEnv GH_REPO_NAME ""
     # Set RFC_REPO
-    sEnv RFC_REPO "$(echo "$REPO" | sed 's/\./-/g; s/_/-/g')" || sEnv RFC_REPO ""
+    sEnv RFC_REPO "$(sed 's/\./-/g; s/_/-/g' <<<"$repo_name")" || sEnv RFC_REPO ""
 }
 
 # Category: Release Info
@@ -212,10 +234,11 @@ set_release_env() {
 
 # Category: Repository Info
 set_repository_env() {
+    local repo_name="${GITHUB_REPOSITORY#*/}"
     # Set GH_WORKFLOW_URL
     sEnv GH_WORKFLOW_URL "${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" || sEnv GH_WORKFLOW_URL ""
     # Set GPR_PROJECT
-    sEnv GPR_PROJECT "ghcr.io/${GITHUB_REPOSITORY_OWNER:-default_owner}/$REPO" || sEnv GPR_PROJECT ""
+    sEnv GPR_PROJECT "ghcr.io/${GITHUB_REPOSITORY_OWNER:-default_owner}/$repo_name" || sEnv GPR_PROJECT ""
     # Set GH_DEFAULT_BRANCH
     sEnv GH_DEFAULT_BRANCH "$(jq -r '.repository.default_branch' "$GITHUB_EVENT_PATH")" || sEnv GH_DEFAULT_BRANCH ""
     # Set GIT_SHORT_HASH
@@ -259,8 +282,8 @@ set_changed_files_env() {
             }
             changed_files_collected="true"
         fi
-    elif [[ "$event_name" == "pull_request" || "$event_name" == "pull_request_target" ]]; then
-        pr_number="$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH")" || pr_number=""
+    elif [[ "$event_name" == "pull_request" || "$event_name" == "pull_request_target" || "$event_name" == "issue_comment" ]]; then
+        pr_number="$(event_pr_number)" || pr_number=""
         if [[ -n "$pr_number" ]]; then
             if files_changed="$(pr_api_changed_files_json "$pr_number" changed)" && files_deleted="$(pr_api_changed_files_json "$pr_number" deleted)"; then
                 changed_files_collected="true"
@@ -269,12 +292,16 @@ set_changed_files_env() {
                 files_changed="[]"
                 files_deleted="[]"
             fi
+        elif [[ "$event_name" == "issue_comment" ]]; then
+            # An issue_comment can target an issue or a pull request. Plain issue
+            # comments have no meaningful PR changed-file set.
+            changed_files_collected="true"
         else
             echo "Warning: ${event_name} event payload did not contain pull_request.number; falling back to git changed file detection." >&2
         fi
     elif [[ "$event_name" == "merge_group" ]]; then
-        pr_number="$(sed -E 's/.*pr-([0-9]+)-.*/\1/' <<< "${GITHUB_REF_NAME:-}")"
-        if [[ "$pr_number" =~ ^[0-9]+$ ]]; then
+        pr_number="$(event_pr_number)" || pr_number=""
+        if [[ -n "$pr_number" ]]; then
             if files_changed="$(pr_api_changed_files_json "$pr_number" changed)" && files_deleted="$(pr_api_changed_files_json "$pr_number" deleted)"; then
                 changed_files_collected="true"
             else
@@ -317,50 +344,132 @@ set_changed_files_env() {
     return 0
 }
 
+# Read from the event payload, which already carries these: no API call, no
+# token. The payload on disk never changes, so this is a snapshot from when the
+# event fired — see the README for what that costs a consumer.
+pr_metadata_from_event() { # event-path -> {labels,reviewers,teams}
+    local event_path="${1:-}"
+    [[ -n "$event_path" && -f "$event_path" ]] || return 1
+    jq -e -c '
+      .pull_request // empty
+      | {
+          labels: [.labels[]?.name],
+          reviewers: [.requested_reviewers[]?.login],
+          teams: [.requested_teams[]?.slug]
+        }' "$event_path" 2>/dev/null
+}
+
+# Same shape for events whose payload has no pull_request object of its own.
+# gh returns users and teams in one reviewRequests array, which is why the
+# split below keys off login rather than a type field.
+pr_metadata_from_payload() { # gh pr view JSON on stdin -> {labels,reviewers,teams}
+    jq -e -c '
+      {
+        labels: [.labels[]?.name],
+        reviewers: [.reviewRequests[]? | select(.login != null) | .login],
+        teams: [.reviewRequests[]? | select(.login == null) | (.slug // .name)
+                | select(. != null)]
+      }' 2>/dev/null
+}
+
+pr_refs_from_event() { # event-path -> {head_ref,head_sha,base_ref,base_sha}
+    local event_path="${1:-}"
+    [[ -n "$event_path" && -f "$event_path" ]] || return 1
+    jq -e -c '
+      .pull_request // empty
+      | {
+          head_ref: (.head.ref // ""),
+          head_sha: (.head.sha // ""),
+          base_ref: (.base.ref // ""),
+          base_sha: (.base.sha // "")
+        }' "$event_path" 2>/dev/null
+}
+
+pr_refs_from_payload() { # gh pr view JSON on stdin -> {head_ref,head_sha,base_ref,base_sha}
+    jq -e -c '
+      {
+        head_ref: (.headRefName // ""),
+        head_sha: (.headRefOid // ""),
+        base_ref: (.baseRefName // ""),
+        base_sha: (.baseRefOid // "")
+      }' 2>/dev/null
+}
+
 # Category: PR Info
 set_pr_env() {
     PR_PAYLOAD=""
     local event_name="${GITHUB_EVENT_NAME:-}"
-    # For pull_request/pull_request_target events, use PR number from event payload.
-    # This avoids ambiguous branch-name lookups for fork PRs.
-    if [[ "$event_name" == "pull_request" || "$event_name" == "pull_request_target" ]]; then
-        PR_NUMBER="$(jq -r '.pull_request.number // empty' "$GITHUB_EVENT_PATH")" || PR_NUMBER=""
-        if [[ -n "$PR_NUMBER" ]]; then
-            # Fetch all relevant PR details
-            PR_PAYLOAD=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json \
-              number,title,body,url,state,isDraft,author,headRefOid,createdAt,mergedAt,updatedAt,reviews,comments,reviewDecision \
-              --jq '.') || {
-                echo "Warning: Failed to fetch PR details for PR number $PR_NUMBER" >&2
-                PR_PAYLOAD=""
-            }
-        else
-            echo "Warning: ${event_name} event payload did not contain pull_request.number; falling back to SHA lookup for $GITHUB_SHA" >&2
-            PR_PAYLOAD=$(gh pr list --repo "$GITHUB_REPOSITORY" --search "$GITHUB_SHA" --state merged --json \
-              number,title,body,url,state,isDraft,author,headRefOid,createdAt,mergedAt,updatedAt \
-              --jq '.[0] // empty') || {
-                echo "Warning: No PR found for commit $GITHUB_SHA" >&2
-                PR_PAYLOAD=""
-            }
+    local pr_number=""
+    local pr_json_fields='number,title,body,url,state,isDraft,author,headRefName,headRefOid,baseRefName,baseRefOid,createdAt,mergedAt,updatedAt,reviews,comments,reviewDecision,labels,reviewRequests'
+    local fallback_pr_json_fields='number,title,body,url,state,isDraft,author,headRefName,headRefOid,baseRefName,baseRefOid,createdAt,mergedAt,updatedAt,labels,reviewRequests'
+    local use_sha_fallback="false"
+
+    pr_number="$(event_pr_number)" || pr_number=""
+    if [[ -n "$pr_number" ]]; then
+        if [[ "$event_name" == "merge_group" ]]; then
+            sEnv MERGE_GROUP_PR "$pr_number" || sEnv MERGE_GROUP_PR ""
         fi
-    elif [[ "$event_name" == "merge_group" ]]; then
-        # If in a merge_group, extract the PR number from the branch name
-        MERGE_GROUP_PR=$(sed -E 's/.*pr-([0-9]+)-.*/\1/' <<< "$GITHUB_REF_NAME")
-        sEnv MERGE_GROUP_PR "$MERGE_GROUP_PR" || sEnv MERGE_GROUP_PR ""
-        PR_PAYLOAD=$(gh pr view "$MERGE_GROUP_PR" --repo "$GITHUB_REPOSITORY" --json \
-          number,title,body,url,state,isDraft,author,headRefOid,createdAt,mergedAt,updatedAt,reviews,comments,reviewDecision \
-          --jq '.') || {
-            echo "Warning: Failed to fetch PR details for $MERGE_GROUP_PR" >&2
+        PR_PAYLOAD=$(gh pr view "$pr_number" --repo "$GITHUB_REPOSITORY" --json \
+          "$pr_json_fields" --jq '.') || {
+            echo "Warning: Failed to fetch PR details for PR number $pr_number" >&2
             PR_PAYLOAD=""
-          }
-    else
-        # Not in PR context; try to find the most recent merged PR associated with GITHUB_SHA
+        }
+    elif [[ "$event_name" == "pull_request" || "$event_name" == "pull_request_target" ]]; then
+        echo "Warning: ${event_name} event payload did not contain pull_request.number; falling back to SHA lookup for $GITHUB_SHA" >&2
+        use_sha_fallback="true"
+    elif [[ "$event_name" == "merge_group" ]]; then
+        echo "Warning: Could not extract PR number from merge_group ref '${GITHUB_REF_NAME:-}'." >&2
+    elif [[ "$event_name" != "issue_comment" ]]; then
+        use_sha_fallback="true"
+    fi
+
+    if [[ "$use_sha_fallback" == "true" ]]; then
+        # Not in a recognized PR context; try to find the most recent merged PR
+        # associated with GITHUB_SHA.
         PR_PAYLOAD=$(gh pr list --repo "$GITHUB_REPOSITORY" --search "$GITHUB_SHA" --state merged --json \
-          number,title,body,url,state,isDraft,author,headRefOid,createdAt,mergedAt,updatedAt \
-          --jq '.[0] // empty') || {
+          "$fallback_pr_json_fields" --jq '.[0] // empty') || {
             echo "Warning: No PR found for commit $GITHUB_SHA" >&2
             PR_PAYLOAD=""
         }
     fi
+
+    if [[ "$event_name" == "issue_comment" ]]; then
+        local event_comment_body_json='""'
+        local event_comment_body_truncated='false'
+        event_comment_body_json="$(jq -cr --argjson limit 200 '(.comment.body // "")[0:$limit] | @json' "$GITHUB_EVENT_PATH")" \
+          || event_comment_body_json='""'
+        event_comment_body_truncated="$(jq -r --argjson limit 200 '((.comment.body // "") | length) > $limit' "$GITHUB_EVENT_PATH")" \
+          || event_comment_body_truncated='false'
+        sEnvRaw GH_EVENT_COMMENT_BODY_JSON "$event_comment_body_json" \
+          || sEnvRaw GH_EVENT_COMMENT_BODY_JSON '""'
+        sEnv GH_EVENT_COMMENT_BODY_TRUNCATED "$event_comment_body_truncated" \
+          || sEnv GH_EVENT_COMMENT_BODY_TRUNCATED 'false'
+    fi
+    # Event payload wins, so these survive a failed lookup above or no token at
+    # all; the fetched payload is only a fallback.
+    local pr_meta=""
+    pr_meta="$(pr_metadata_from_event "${GITHUB_EVENT_PATH:-}")" || pr_meta=""
+    if [[ -z "$pr_meta" && -n "$PR_PAYLOAD" ]]; then
+        pr_meta="$(pr_metadata_from_payload <<<"$PR_PAYLOAD")" || pr_meta=""
+    fi
+    if [[ -n "$pr_meta" ]]; then
+        sEnvRaw GH_PR_LABELS "$(jq -c '.labels' <<<"$pr_meta")" || sEnvRaw GH_PR_LABELS "[]"
+        sEnvRaw GH_PR_REQUESTED_REVIEWERS "$(jq -c '.reviewers' <<<"$pr_meta")" || sEnvRaw GH_PR_REQUESTED_REVIEWERS "[]"
+        sEnvRaw GH_PR_REQUESTED_TEAMS "$(jq -c '.teams' <<<"$pr_meta")" || sEnvRaw GH_PR_REQUESTED_TEAMS "[]"
+    fi
+
+    local pr_refs=""
+    pr_refs="$(pr_refs_from_event "${GITHUB_EVENT_PATH:-}")" || pr_refs=""
+    if [[ -z "$pr_refs" && -n "$PR_PAYLOAD" ]]; then
+        pr_refs="$(pr_refs_from_payload <<<"$PR_PAYLOAD")" || pr_refs=""
+    fi
+    if [[ -n "$pr_refs" ]]; then
+        sEnvRaw GH_PR_HEAD_REF "$(jq -r '.head_ref' <<<"$pr_refs")" || sEnvRaw GH_PR_HEAD_REF ""
+        sEnv GH_PR_HEAD_SHA "$(jq -r '.head_sha' <<<"$pr_refs")" || sEnv GH_PR_HEAD_SHA ""
+        sEnvRaw GH_PR_BASE_REF "$(jq -r '.base_ref' <<<"$pr_refs")" || sEnvRaw GH_PR_BASE_REF ""
+        sEnv GH_PR_BASE_SHA "$(jq -r '.base_sha' <<<"$pr_refs")" || sEnv GH_PR_BASE_SHA ""
+    fi
+
     # If PR_PAYLOAD is populated, extract details and set environment variables
     if [[ -n "$PR_PAYLOAD" ]]; then
         GH_PR_NUMBER=$(echo "$PR_PAYLOAD" | jq -r '.number // empty')
@@ -374,7 +483,27 @@ set_pr_env() {
         GH_PR_UPDATED_AT=$(echo "$PR_PAYLOAD" | jq -r '.updatedAt // empty')
         GH_PR_IS_DRAFT=$(echo "$PR_PAYLOAD" | jq -r '.isDraft // empty')
         GH_PR_REVIEWS=$(echo "$PR_PAYLOAD" | jq -c '.reviews // []')
-        GH_PR_COMMENTS=$(echo "$PR_PAYLOAD" | jq -c '[.comments? // [] | arrays | .[] | {user: .author.login, comment_url: .url}]')
+        local pr_comments_meta=''
+        pr_comments_meta=$(echo "$PR_PAYLOAD" | jq -c --argjson body_limit 200 --argjson count_limit 20 '
+          (.comments? // [] | arrays) as $all
+          | ($all
+              | if length > $count_limit then .[-$count_limit:] else . end
+              | map(
+                  (.body // "") as $body
+                  | {
+                      user: (.author.login // ""),
+                      comment_url: (.url // ""),
+                      body: $body[0:$body_limit],
+                      body_truncated: (($body | length) > $body_limit)
+                    }
+                )) as $summaries
+          | {
+              comments: ($summaries | map(del(.body_truncated))),
+              truncated: ((($all | length) > $count_limit) or any($summaries[]; .body_truncated))
+            }
+        ')
+        GH_PR_COMMENTS=$(jq -c '.comments' <<<"$pr_comments_meta")
+        GH_PR_COMMENTS_TRUNCATED=$(jq -r '.truncated' <<<"$pr_comments_meta")
         # Set environment variables
         sEnv GH_PR "$GH_PR_NUMBER" || sEnv GH_PR ""
         sEnvRaw GH_PR_TITLE "$GH_PR_TITLE" || sEnvRaw GH_PR_TITLE ""
@@ -388,6 +517,7 @@ set_pr_env() {
         sEnv GH_PR_IS_DRAFT "$GH_PR_IS_DRAFT" || sEnv GH_PR_IS_DRAFT ""
         sEnvRaw GH_PR_REVIEWS "$GH_PR_REVIEWS" || sEnvRaw GH_PR_REVIEWS ""
         sEnvRaw GH_PR_COMMENTS "$GH_PR_COMMENTS" || sEnvRaw GH_PR_COMMENTS ""
+        sEnv GH_PR_COMMENTS_TRUNCATED "$GH_PR_COMMENTS_TRUNCATED" || sEnv GH_PR_COMMENTS_TRUNCATED "false"
         # Calculate time differences
         if [[ -n "$GH_PR_CREATED_AT" && -n "$GH_PR_MERGED_AT" ]]; then
             MERGED_DIFF_SECONDS=$(( $(date -d "$GH_PR_MERGED_AT" +%s) - $(date -d "$GH_PR_CREATED_AT" +%s) ))
@@ -617,5 +747,7 @@ main() {
     set_version_env
 }
 
-# Invoke main
-main
+# Invoke main unless this file is sourced by its fixture tests.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main
+fi

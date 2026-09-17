@@ -1,3 +1,4 @@
+# Description: Runs a vanilla Actions Toolbox test on every pull request and expands coverage when the action or its CI changes.
 name: "Test Actions Toolbox"
 on:
   workflow_dispatch:
@@ -8,45 +9,245 @@ on:
 permissions: write-all
 
 jobs:
-  run:
+  vanilla:
+    name: Test action (vanilla)
+    runs-on: ubuntu-latest
+    outputs:
+      full-suite: ${{ steps.scope.outputs.full-suite }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: 🧰 Actions Toolbox
+        uses: ./composite/actions-toolbox
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Determine test scope
+        id: scope
+        if: always()
+        shell: bash
+        run: |
+          run_full_suite=true
+          reason='manual run or unavailable changed-file metadata'
+
+          if [[ "${GITHUB_EVENT_NAME}" == 'pull_request' ]]; then
+            if ! jq -e --argjson deleted "${FILES_DELETED:-null}" '
+              type == "array" and
+              ($deleted | type == "array") and
+              (length + ($deleted | length) > 0)
+            ' <<< "${FILES_CHANGED:-null}" >/dev/null 2>&1; then
+              echo '::warning::Changed-file metadata is unavailable or empty; running the full suite.'
+            elif jq -e --argjson deleted "$FILES_DELETED" '
+              any((. + $deleted)[];
+                startswith("composite/actions-toolbox/") or
+                . == ".github/workflows/_test-actions-toolbox.yml"
+              )
+            ' <<< "$FILES_CHANGED" >/dev/null; then
+              reason='Actions Toolbox or test workflow changed'
+            else
+              run_full_suite=false
+              reason='no Actions Toolbox or test workflow changes'
+            fi
+          fi
+
+          echo "full-suite=${run_full_suite}" >> "$GITHUB_OUTPUT"
+          echo "Full Actions Toolbox suite: ${run_full_suite} (${reason})."
+
+      - name: Verify base behavior
+        env:
+          EXPECTED_VERBOSE: ${{ runner.debug }}
+        run: |
+          set -euo pipefail
+
+          echo "Running 'gh --version':"
+          gh --version
+
+          echo "Running 'yq --version':"
+          yq --version
+
+          echo "Checking that GH_CLI_VERSION was exported:"
+          echo "GH_CLI_VERSION=${GH_CLI_VERSION:-<unset>}"
+          [[ -n "${GH_CLI_VERSION:-}" ]] \
+            || { echo "::error::GH_CLI_VERSION was not exported"; exit 1; }
+
+          echo "Checking that YQ_VERSION was exported:"
+          echo "YQ_VERSION=${YQ_VERSION:-<unset>}"
+          [[ -n "${YQ_VERSION:-}" ]] \
+            || { echo "::error::YQ_VERSION was not exported"; exit 1; }
+
+          echo "Checking RUNNER_VERBOSE against the expected value:"
+          echo "RUNNER_VERBOSE=${RUNNER_VERBOSE:-<unset>}"
+          echo "EXPECTED_VERBOSE=${EXPECTED_VERBOSE:-<unset>}"
+          [[ "${RUNNER_VERBOSE:-}" == "${EXPECTED_VERBOSE:-}" ]] \
+            || { echo "::error::expected RUNNER_VERBOSE='${EXPECTED_VERBOSE:-}', got '${RUNNER_VERBOSE:-}'"; exit 1; }
+
+  fixtures:
+    name: Test script fixtures
+    needs: vanilla
+    if: always() && needs.vanilla.outputs.full-suite == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Test GitHub release artifact discovery
-        run: bash composite/actions-toolbox/tests/test_release_installer.sh
+      - name: Run fixture tests
+        run: |
+          set -euo pipefail
+          for test in composite/actions-toolbox/tests/test_*.sh; do
+            echo "::group::${test}"
+            bash "$test"
+            echo '::endgroup::'
+          done
 
-      - name: 🧰 Actions Toolbox (vanilla)
+  marker-reuse:
+    name: Reuse metadata and repeat dependency setup
+    needs: vanilla
+    if: always() && needs.vanilla.outputs.full-suite == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Collect the first metadata snapshot
         uses: ./composite/actions-toolbox
-        with:
-          verbose: false
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: 🧰 Actions Toolbox (verbose)
+      - name: Preserve a first-snapshot value
+        run: |
+          set -euo pipefail
+          [[ "${ACTIONS_TOOLBOX_MARKER:-}" == '2' ]]
+          echo 'GH_COMMIT_URL=first-snapshot-sentinel' >> "$GITHUB_ENV"
+
+      - name: Reuse metadata and request another package
         uses: ./composite/actions-toolbox
         with:
-          verbose: true
+          marker-mode: auto
+          include-packages: 'sponge:moreutils'
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: 🧰 Actions Toolbox (vanilla packages)
+      - name: Verify snapshot reuse and repeated dependency setup
+        run: |
+          set -euo pipefail
+          [[ "${ACTIONS_TOOLBOX_MARKER:-}" == '2' ]]
+          [[ "${GH_COMMIT_URL:-}" == 'first-snapshot-sentinel' ]]
+          command -v sponge
+
+  action:
+    name: Test action (${{ matrix.name }})
+    needs: vanilla
+    if: always() && needs.vanilla.outputs.full-suite == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: verbose
+            verbose: true
+            include-packages: ''
+            verification: verbose
+          - name: vanilla packages
+            verbose: false
+            include-packages: 'ffmpeg'
+            verification: vanilla-packages
+          - name: verbose packages
+            verbose: true
+            include-packages: |
+              ffmpeg
+              cmake:build-essential
+              apache2=2.4*
+              python3:python3-dev=3.10*
+            verification: verbose-packages
+          - name: GitHub release packages
+            verbose: true
+            include-packages: |
+              actionlint:rhysd/actionlint=1.7.7
+              grafana/gcx
+            verification: release-packages
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: 🧰 Actions Toolbox
         uses: ./composite/actions-toolbox
         with:
-          verbose: false
-          include-packages: "ffmpeg"
+          verbose: ${{ matrix.verbose }}
+          include-packages: ${{ matrix.include-packages }}
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: 🧰 Actions Toolbox (verbose packages)
-        uses: ./composite/actions-toolbox
-        with:
-          verbose: true
-          include-packages: |
-            ffmpeg
-            cmake:build-essential
-            apache2=2.4*
-            python3:python3-dev=3.10*
+      - name: Verify base behavior
         env:
-          GH_TOKEN: ${{ github.token }}
+          EXPECTED_VERBOSE: ${{ matrix.verbose && '1' || runner.debug }}
+        run: |
+          set -euo pipefail
+
+          echo "Running 'gh --version':"
+          gh --version
+
+          echo "Running 'yq --version':"
+          yq --version
+
+          echo "Checking that GH_CLI_VERSION was exported:"
+          echo "GH_CLI_VERSION=${GH_CLI_VERSION:-<unset>}"
+          [[ -n "${GH_CLI_VERSION:-}" ]] \
+            || { echo "::error::GH_CLI_VERSION was not exported"; exit 1; }
+
+          echo "Checking that YQ_VERSION was exported:"
+          echo "YQ_VERSION=${YQ_VERSION:-<unset>}"
+          [[ -n "${YQ_VERSION:-}" ]] \
+            || { echo "::error::YQ_VERSION was not exported"; exit 1; }
+
+          echo "Checking RUNNER_VERBOSE against the expected value:"
+          echo "RUNNER_VERBOSE=${RUNNER_VERBOSE:-<unset>}"
+          echo "EXPECTED_VERBOSE=${EXPECTED_VERBOSE:-<unset>}"
+          [[ "${RUNNER_VERBOSE:-}" == "${EXPECTED_VERBOSE:-}" ]] \
+            || { echo "::error::expected RUNNER_VERBOSE='${EXPECTED_VERBOSE:-}', got '${RUNNER_VERBOSE:-}'"; exit 1; }
+
+      - name: Verify vanilla packages
+        if: matrix.verification == 'vanilla-packages'
+        run: |
+          set -euo pipefail
+
+          echo "Running 'ffmpeg -version':"
+          ffmpeg -version
+
+      - name: Verify verbose packages
+        if: matrix.verification == 'verbose-packages'
+        run: |
+          set -euo pipefail
+
+          echo "Running 'ffmpeg -version':"
+          ffmpeg -version
+
+          echo "Running 'cmake --version':"
+          cmake --version
+
+          echo "Running 'apache2 -v':"
+          apache2 -v
+
+          echo "Running 'python3 --version':"
+          python3 --version
+
+      - name: Verify GitHub release packages
+        if: matrix.verification == 'release-packages'
+        run: |
+          set -euo pipefail
+
+          echo "Running 'actionlint --version':"
+          actionlint --version
+
+          echo "Running 'gcx --version':"
+          gcx --version
+
+          echo "Checking ACTIONLINT_VERSION against the expected value:"
+          echo "ACTIONLINT_VERSION=${ACTIONLINT_VERSION:-<unset>}"
+          [[ "${ACTIONLINT_VERSION:-}" == 'v1.7.7' ]] \
+            || { echo "::error::expected ACTIONLINT_VERSION=v1.7.7, got '${ACTIONLINT_VERSION:-}'"; exit 1; }
+
+          echo "Checking that GCX_VERSION was exported:"
+          echo "GCX_VERSION=${GCX_VERSION:-<unset>}"
+          [[ -n "${GCX_VERSION:-}" ]] \
+            || { echo "::error::GCX_VERSION was not exported"; exit 1; }

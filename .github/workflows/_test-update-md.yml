@@ -1,0 +1,59 @@
+# Description: Tests parameterized README generation and the unchanged repository README fixture.
+name: Test Update Markdown Index
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'composite/update-md/**'
+      - '.github/workflows/_update-readme.yml'
+      - '.github/workflows/_test-update-md.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Prepare test tools
+        uses: ./composite/actions-toolbox
+        with:
+          include-packages: |
+            jq
+            yq
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Run Bash fixtures
+        shell: bash
+        run: |
+          composite/update-md/tests/test_generate_readme.sh
+
+      - name: Generate a custom document through the composite
+        uses: ./composite/update-md
+        with:
+          title: 'Example Project'
+          description: 'Custom project description.'
+          header: 'Installation instructions.'
+          footer: 'License information.'
+          sections: '[]'
+          readme-path: 'README.fixture.md'
+
+      - name: Verify custom document
+        shell: bash
+        run: |
+          cat > "${RUNNER_TEMP}/update-md-expected.md" <<'EOF'
+          # Example Project
+
+          Custom project description.
+
+          Installation instructions.
+
+          License information.
+          EOF
+          cmp "${RUNNER_TEMP}/update-md-expected.md" README.fixture.md
+          git diff --exit-code -- README.md

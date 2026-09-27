@@ -1,3 +1,4 @@
+# Description: Regenerates this repository's README index from its documented workflows and actions.
 name: Update README Index
 
 on:
@@ -8,7 +9,7 @@ on:
     paths:
       - '.github/workflows/*.yml'
       - '.github/workflows/*.md'
-      - 'composite/update-md/action.yml'
+      - 'composite/update-md/**'
       - 'composite/**/README.md'
 jobs:
   update-readme:
@@ -21,6 +22,34 @@ jobs:
       
       - name: Update README.md
         uses: ./composite/update-md
+        with:
+          title: 'gh-actions'
+          description: 'A centralized repository for reusable GitHub Actions workflows and composite actions. These actions and workflows can be referenced from any GitHub Actions workflow in any repository.'
+          sections: |
+            [
+              {
+                "title": "Workflows Index",
+                "path": ".github/workflows",
+                "kind": "files",
+                "include": ["*.yml"],
+                "exclude": ["_*.yml"],
+                "contains": "^[[:space:]]*workflow_call:",
+                "include-without-content": ["ruleset-*.yml"],
+                "title-pattern": "^name:[[:blank:]]*(.*)$",
+                "strip-title-quotes": true,
+                "description-pattern": "^# Description:[[:blank:]]*(.*)$",
+                "doc-extension": ".md"
+              },
+              {
+                "title": "Composite Actions Index",
+                "path": "composite",
+                "kind": "directories",
+                "metadata-file": "README.md",
+                "title-pattern": "^# +(.+)$",
+                "description-heading": "Description",
+                "skip-empty": false
+              }
+            ]
       - name: Commit and push changes
         run: |
           git config user.name "github-actions[bot]"

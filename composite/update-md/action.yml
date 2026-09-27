@@ -1,16 +1,88 @@
 name: 'Update Markdown Index'
 description: 'Automatically generates and updates README.md indexes for reusable workflows and composite actions'
 inputs:
+  title:
+    description: 'README title, without the Markdown heading prefix; empty omits the title'
+    required: false
+    default: ''
+  title-template:
+    description: 'Template for the README title; supports {title}'
+    required: false
+    default: '# {title}'
+  description:
+    description: 'Markdown description below the title'
+    required: false
+    default: ''
+  header:
+    description: 'Additional Markdown before the generated sections'
+    required: false
+    default: ''
+  footer:
+    description: 'Additional Markdown after the generated sections'
+    required: false
+    default: ''
+  sections:
+    description: 'JSON array of index sections; use [] for a document with only custom text'
+    required: false
+    default: |
+      [
+        {
+          "title": "Workflows Index",
+          "path": "{workflow-dir}",
+          "kind": "files",
+          "include": ["*.yml"],
+          "exclude": ["_*.yml"],
+          "contains": "^[[:space:]]*workflow_call:",
+          "include-without-content": ["ruleset-*.yml"],
+          "title-pattern": "^name:[[:blank:]]*(.*)$",
+          "strip-title-quotes": true,
+          "description-pattern": "^# Description:[[:blank:]]*(.*)$",
+          "doc-extension": ".md"
+        },
+        {
+          "title": "Composite Actions Index",
+          "path": "{composite-dir}",
+          "kind": "directories",
+          "metadata-file": "README.md",
+          "title-pattern": "^# +(.+)$",
+          "description-heading": "Description",
+          "skip-empty": false
+        }
+      ]
+  section-template:
+    description: 'Template for section headings; supports {title} and {path}'
+    required: false
+    default: '## {title}'
+  directory-template:
+    description: 'Template for the directory row; supports {icon}, {path}, {title}, and {link}'
+    required: false
+    default: '- {icon} __{path}__'
+  entry-template:
+    description: 'Template for each entry; supports {icon}, {title}, {path}, {link}, and {description}'
+    required: false
+    default: '   - {icon} [{title}]({link})'
+  description-template:
+    description: 'Template below entries with descriptions; empty disables description rows'
+    required: false
+    default: '      - _{description}_'
+  directory-icon:
+    description: 'Directory icon; may be empty or plain text'
+    required: false
+    default: '📂'
+  file-icon:
+    description: 'Entry icon; may be empty or plain text'
+    required: false
+    default: '📄'
   workflow-dir:
-    description: 'Directory containing reusable workflows'
+    description: 'Workspace-relative directory used by {workflow-dir} in sections'
     required: false
     default: '.github/workflows'
   composite-dir:
-    description: 'Directory containing composite actions'
+    description: 'Workspace-relative directory used by {composite-dir} in sections'
     required: false
     default: 'composite'
   readme-path:
-    description: 'Path to the README.md file to update'
+    description: 'Workspace-relative path to the Markdown file to generate'
     required: false
     default: 'README.md'
 runs:
@@ -19,137 +91,20 @@ runs:
     - name: Generate README index
       shell: bash
       env:
+        INPUT_TITLE: ${{ inputs.title }}
+        INPUT_TITLE_TEMPLATE: ${{ inputs.title-template }}
+        INPUT_DESCRIPTION: ${{ inputs.description }}
+        INPUT_HEADER: ${{ inputs.header }}
+        INPUT_FOOTER: ${{ inputs.footer }}
+        INPUT_SECTIONS: ${{ inputs.sections }}
+        INPUT_SECTION_TEMPLATE: ${{ inputs.section-template }}
+        INPUT_DIRECTORY_TEMPLATE: ${{ inputs.directory-template }}
+        INPUT_ENTRY_TEMPLATE: ${{ inputs.entry-template }}
+        INPUT_DESCRIPTION_TEMPLATE: ${{ inputs.description-template }}
+        INPUT_DIRECTORY_ICON: ${{ inputs.directory-icon }}
+        INPUT_FILE_ICON: ${{ inputs.file-icon }}
         INPUT_WORKFLOW_DIR: ${{ inputs.workflow-dir }}
         INPUT_COMPOSITE_DIR: ${{ inputs.composite-dir }}
         INPUT_README_PATH: ${{ inputs.readme-path }}
       run: |
-        set -e
-
-        PROJECT_ROOT="${GITHUB_WORKSPACE}"
-
-        validate_workspace_relative_path() {
-          local input_name="$1"
-          local input_path="$2"
-
-          if [ -z "$input_path" ]; then
-            echo "$input_name must not be empty." >&2
-            exit 1
-          fi
-
-          case "$input_path" in
-            /*|..|../*|*/..|*/../*)
-              echo "$input_name must be relative to the workspace and must not contain '..' segments: $input_path" >&2
-              exit 1
-              ;;
-          esac
-        }
-
-        validate_workspace_relative_path "workflow-dir" "$INPUT_WORKFLOW_DIR"
-        validate_workspace_relative_path "composite-dir" "$INPUT_COMPOSITE_DIR"
-        validate_workspace_relative_path "readme-path" "$INPUT_README_PATH"
-
-        WORKFLOW_DIR="${PROJECT_ROOT}/${INPUT_WORKFLOW_DIR}"
-        COMPOSITE_DIR="${PROJECT_ROOT}/${INPUT_COMPOSITE_DIR}"
-        README_PATH="${PROJECT_ROOT}/${INPUT_README_PATH}"
-        TEMP_ROOT="${RUNNER_TEMP:-${TMPDIR:-.}}"
-        reusable_entries=""
-
-        cleanup_temp_files() {
-          [ -z "${reusable_entries:-}" ] || rm -f "$reusable_entries"
-        }
-        trap cleanup_temp_files EXIT
-
-        # Generate the top section of README
-        README_TOP=$(cat <<- 'EOF'
-        # gh-actions
-
-        A centralized repository for reusable GitHub Actions workflows and composite actions. These actions and workflows can be referenced from any GitHub Actions workflow in any repository.
-
-        EOF
-        )
-
-        # Start building the new README
-        mkdir -p "$(dirname "$README_PATH")"
-        echo "$README_TOP" > "$README_PATH"
-        echo "" >> "$README_PATH"
-
-        # Find reusable workflows and ruleset-required workflows.
-        if [ -d "$WORKFLOW_DIR" ]; then
-          reusable_count=0
-          reusable_entries="$(mktemp "$TEMP_ROOT/update-md-reusable.XXXXXX")"
-
-          while IFS= read -r workflow_file; do
-            case "$(basename "$workflow_file")" in
-              ruleset-*.yml) ;;
-              *)
-                if ! grep -Eq '^[[:space:]]*workflow_call:' "$workflow_file"; then
-                  continue
-                fi
-                ;;
-            esac
-
-            workflow_name="$(
-              sed -n 's/^name:[[:space:]]*//p' "$workflow_file" |
-                head -1 |
-                sed -e 's/^["'\'']//; s/["'\'']$//'
-            )"
-            if [ -z "$workflow_name" ]; then
-              workflow_name="$(basename "$workflow_file")"
-            fi
-
-            workflow_description="$(
-              sed -n 's/^# Description:[[:space:]]*//p' "$workflow_file" |
-                head -1
-            )"
-
-            workflow_rel="${workflow_file#"$PROJECT_ROOT"/}"
-            workflow_doc="${workflow_file%.yml}.md"
-            workflow_link="$workflow_rel"
-            if [ -f "$workflow_doc" ]; then
-              workflow_link="${workflow_doc#"$PROJECT_ROOT"/}"
-            fi
-            {
-              echo "   - 📄 [$workflow_name](./$workflow_link)"
-              if [ -n "$workflow_description" ]; then
-                echo "      - _${workflow_description}_"
-              fi
-            } >> "$reusable_entries"
-            reusable_count=$((reusable_count + 1))
-          done < <(find "$WORKFLOW_DIR" -maxdepth 1 -type f -name '*.yml' ! -name '_*.yml' | sort)
-
-          if [ "$reusable_count" -gt 0 ]; then
-            {
-              echo "## Workflows Index"
-              echo "- 📂 __${INPUT_WORKFLOW_DIR}__"
-              cat "$reusable_entries"
-              echo ""
-            } >> "$README_PATH"
-          fi
-        fi
-
-        echo "## Composite Actions Index" >> "$README_PATH"
-
-        # Find all action directories (excluding hidden files and directories)
-        if [ -d "$COMPOSITE_DIR" ]; then
-          echo "- 📂 __${INPUT_COMPOSITE_DIR}__" >> "$README_PATH"
-          while IFS= read -r action_dir; do
-            action_rel="${action_dir#"$PROJECT_ROOT"/}"
-            readme_file="$action_dir/README.md"
-
-            if [ -f "$readme_file" ]; then
-              # Extract the title (H1)
-              title=$(grep -m 1 '^# ' "$readme_file" | sed 's/^# //')
-
-              # Extract the description (content after ## Description)
-              description=$(sed -n '/^## Description$/,/^## /{ /^## Description$/d; /^## /d; p; }' "$readme_file" | sed '/^$/d' | head -1)
-
-              # Write the entry in file tree format
-              echo "   - 📄 [$title](./$action_rel/)" >> "$README_PATH"
-              if [ -n "$description" ]; then
-                echo "      - _${description}_" >> "$README_PATH"
-              fi
-            fi
-          done < <(find "$COMPOSITE_DIR" -mindepth 1 -maxdepth 1 -type d | sort)
-        fi
-
-        echo "README.md has been updated successfully!"
+        "${GITHUB_ACTION_PATH}/scripts/generate_readme.sh"

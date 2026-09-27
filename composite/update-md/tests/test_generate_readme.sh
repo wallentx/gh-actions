@@ -154,10 +154,12 @@ expect_rejection 'Unknown template placeholder' INPUT_TITLE='Example' INPUT_TITL
 pass 'invalid JSON, fields, types, patterns, and templates preserve existing output'
 
 mkdir -p "$GITHUB_WORKSPACE/existing"
-expect_rejection 'readme-path must name a file' INPUT_README_PATH='existing' INPUT_SECTIONS='[]'
-expect_rejection 'readme-path must name a file' INPUT_README_PATH='.' INPUT_SECTIONS='[]'
+for target in existing . new-dir/ new-dot/. nested/new-dir/ nested/new-dot/.; do
+  expect_rejection 'readme-path must name a file' "INPUT_README_PATH=$target" INPUT_SECTIONS='[]'
+done
 [[ ! -e "$GITHUB_WORKSPACE/existing/generated.md" ]]
-pass 'directory output targets are rejected without creating a nested file'
+[[ ! -e "$GITHUB_WORKSPACE/new-dir" && ! -e "$GITHUB_WORKSPACE/new-dot" && ! -e "$GITHUB_WORKSPACE/nested" ]]
+pass 'existing and directory-form output targets are rejected without creating files'
 
 expect_rejection 'workspace-relative' INPUT_README_PATH='../outside.md'
 expect_rejection 'workspace-relative' INPUT_README_PATH='/outside.md'

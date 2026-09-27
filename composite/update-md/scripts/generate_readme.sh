@@ -27,6 +27,7 @@ workspace_path() {
   printf '%s' "$absolute"
 }
 
+case "$INPUT_README_PATH" in */|*/.) fail 'readme-path must name a file, not a directory.' ;; esac
 README_PATH="$(workspace_path "$INPUT_README_PATH")"
 [[ ! -d "$README_PATH" ]] || fail 'readme-path must name a file, not a directory.'
 # Infer allowed fields and their types from one defaults object; reject NULs

@@ -87,6 +87,20 @@ run_action
 cmp "$TEST_ROOT/expected.md" "$GITHUB_WORKSPACE/README.md"
 pass 'root scans exclude their output and temporary files on repeated runs'
 
+new_workspace root-docs
+printf 'name: Example\n' > "$GITHUB_WORKSPACE/foo.yml"
+printf '# Example documentation\n' > "$GITHUB_WORKSPACE/foo.md"
+printf 'name: Fallback\n' > "$GITHUB_WORKSPACE/bar.yml"
+export INPUT_SECTIONS='[{"title":"Root","path":".","include":["*.yml"],"title-pattern":"^name: (.*)$","doc-extension":".md","show-directory":false,"entry-template":"- [{title}]({link})"}]'
+run_action
+printf '## Root\n- [Fallback](./bar.yml)\n- [Example](./foo.md)\n' > "$TEST_ROOT/expected.md"
+cmp "$TEST_ROOT/expected.md" "$GITHUB_WORKSPACE/README.md"
+export INPUT_README_PATH='catalog/README.md'
+run_action
+printf '## Root\n- [Fallback](../bar.yml)\n- [Example](../foo.md)\n' > "$TEST_ROOT/expected.md"
+cmp "$TEST_ROOT/expected.md" "$GITHUB_WORKSPACE/catalog/README.md"
+pass 'root-level doc-extension siblings, fallbacks, and nested output links'
+
 new_workspace packages
 mkdir -p "$GITHUB_WORKSPACE/packages/alpha" "$GITHUB_WORKSPACE/packages/beta" "$GITHUB_WORKSPACE/packages/no-doc"
 printf '# Alpha\n\n## Summary\n\nFirst package.\n' > "$GITHUB_WORKSPACE/packages/alpha/ABOUT.md"
@@ -206,6 +220,12 @@ expect_rejection 'Unknown section kind' INPUT_SECTIONS='[{"path":"items","kind":
 expect_rejection 'doc-extension must be' INPUT_SECTIONS='[{"path":"items","doc-extension":"../bad"}]'
 expect_rejection 'Unknown template placeholder' INPUT_TITLE='Example' INPUT_TITLE_TEMPLATE='{unknown}' INPUT_SECTIONS='[]'
 pass 'invalid JSON, fields, types, patterns, and templates preserve existing output'
+
+mkdir -p "$GITHUB_WORKSPACE/existing"
+expect_rejection 'readme-path must name a file' INPUT_README_PATH='existing' INPUT_SECTIONS='[]'
+expect_rejection 'readme-path must name a file' INPUT_README_PATH='.' INPUT_SECTIONS='[]'
+[[ ! -e "$GITHUB_WORKSPACE/existing/generated.md" ]]
+pass 'directory output targets are rejected without creating a nested file'
 
 expect_rejection 'workspace-relative' INPUT_README_PATH='../outside.md'
 expect_rejection 'workspace-relative' INPUT_README_PATH='/outside.md'

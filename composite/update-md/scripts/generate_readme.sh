@@ -56,6 +56,7 @@ normalize_path() {
 validate_relative_path 'readme-path' "$INPUT_README_PATH"
 README_REL="$(normalize_path "$INPUT_README_PATH")"
 README_PATH="$(workspace_path "$README_REL")"
+[[ ! -d "$README_PATH" ]] || fail 'readme-path must name a file, not a directory.'
 OUTPUT_DIR="$(dirname "$README_REL")"
 
 # Reject malformed configuration before opening any output. Section keys and
@@ -280,7 +281,7 @@ render_section() {
       elif [[ -n "$section_doc_extension" ]]; then
         sibling="${file##*/}"
         [[ "$sibling" != *.* ]] || sibling="${sibling%.*}"
-        sibling="${relative%/*}/$sibling$section_doc_extension"
+        sibling="$(dirname "$relative")/$sibling$section_doc_extension"
         link="$(workspace_path "$sibling")"
         [[ ! -f "$link" ]] || target="$sibling"
       fi
@@ -319,5 +320,5 @@ append_block "$INPUT_DESCRIPTION"
 append_block "$INPUT_HEADER"
 while IFS= read -r -d '' section; do render_section "$section"; done < <(jq -j '.[] | tojson + "\u0000"' <<< "$INPUT_SECTIONS")
 append_block "$INPUT_FOOTER"
-mv "$GENERATED" "$README_PATH"
+mv -T -- "$GENERATED" "$README_PATH"
 printf '%s has been updated successfully!\n' "$INPUT_README_PATH"

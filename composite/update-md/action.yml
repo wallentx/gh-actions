@@ -6,7 +6,7 @@ inputs:
     required: false
     default: ''
   title-template:
-    description: 'Template for the README title; supports {title}'
+    description: 'Template for the README title; supports {title} and {escaped-title}'
     required: false
     default: '# {title}'
   description:
@@ -50,7 +50,7 @@ inputs:
         }
       ]
   section-template:
-    description: 'Template for section headings; supports {title} and {path}'
+    description: 'Template for section headings; supports {title}, {escaped-title}, and {path}'
     required: false
     default: '## {title}'
   directory-template:
@@ -58,9 +58,9 @@ inputs:
     required: false
     default: '- {icon} __{path}__'
   entry-template:
-    description: 'Template for each entry; supports {icon}, {title}, {path}, {link}, and {description}'
+    description: 'Template for each entry; supports {icon}, {title}, {escaped-title}, {path}, {link}, and {description}'
     required: false
-    default: '   - {icon} [{title}]({link})'
+    default: '   - {icon} [{escaped-title}]({link})'
   description-template:
     description: 'Template below entries with descriptions; empty disables description rows'
     required: false

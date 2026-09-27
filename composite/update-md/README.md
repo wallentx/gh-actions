@@ -13,14 +13,14 @@ All inputs are optional. Text inputs accept literal Markdown, including multilin
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
 | `title` | README title, without a heading prefix | No | Empty |
-| `title-template` | Title formatting with `{title}` | No | `# {title}` |
+| `title-template` | Title formatting with `{title}` or `{escaped-title}` | No | `# {title}` |
 | `description` | Markdown below the title | No | Empty |
 | `header` | Additional Markdown before the indexes | No | Empty |
 | `footer` | Additional Markdown after the indexes | No | Empty |
 | `sections` | JSON array of ordered index sections; `[]` disables indexes | No | Workflow and composite indexes, defined in `action.yml` |
 | `section-template` | Section heading template | No | `## {title}` |
 | `directory-template` | Directory row template; empty omits the row | No | `- {icon} __{path}__` |
-| `entry-template` | Entry row template | No | `   - {icon} [{title}]({link})` |
+| `entry-template` | Entry row template | No | `   - {icon} [{escaped-title}]({link})` |
 | `description-template` | Description row template; empty omits the row | No | `      - _{description}_` |
 | `directory-icon` | Directory icon or text; may be empty | No | `📂` |
 | `file-icon` | Entry icon or text; may be empty | No | `📄` |
@@ -69,7 +69,7 @@ steps:
       title: 'Example Library'
       description: 'Guides and reference material for the library.'
       readme-path: 'catalog/README.md'
-      entry-template: '- [{title}]({link})'
+      entry-template: '- [{escaped-title}]({link})'
       description-template: '  {description}'
       sections: |
         [
@@ -109,7 +109,7 @@ steps:
             "description-heading": "Summary",
             "link-file": "ABOUT.md",
             "exclude": [".*"],
-            "entry-template": "- [{title}]({link}): {description}",
+            "entry-template": "- [{escaped-title}]({link}): {description}",
             "description-template": "",
             "show-directory": false
           }
@@ -144,15 +144,15 @@ Each section is an object in the `sections` JSON array. Sections appear in array
 | `section-template`, `directory-template`, `entry-template`, `description-template` | Override the corresponding template for this section | Corresponding action input |
 | `directory-icon`, `file-icon` | Override the corresponding icon for this section | Corresponding action input |
 
-Globs without `/` match basenames, including in recursive sections. Globs with `/` match paths relative to the section directory; `**/` also matches zero directories. Shell glob syntax supports `*`, `?`, and character classes. Exclusions also apply to ancestor directories. Discovered symlinks, the output document, and generation temporary files are skipped.
+Globs without `/` match basenames, including in recursive sections. Globs with `/` match paths relative to the section directory: `*`, `?`, and character classes stay within one segment, while a complete `**` segment matches recursively (`**/` also matches zero directories). Exclusions also apply to ancestor directories. Discovered symlinks, the output document, and generation temporary files are skipped.
 
 Extraction patterns use jq regular expression syntax and select the first capture group of the first matching physical line, or the full match when there is no capture group. `contains` uses `grep -E` syntax. For example, `"title-pattern": "^name:[[:blank:]]*(.*)$"` reads a one-line `name:` field. These selectors do not parse YAML block scalars or structured metadata. Write JSON backslashes as `\\`.
 
-Templates substitute `{title}`, `{path}`, `{link}`, `{description}`, and `{icon}` once. In entry rows, `path` is workspace-relative, `link` is output-relative, and `icon` uses `file-icon`. For section and directory rows, they refer to the section directory and `directory-icon`; `description` is empty. Input text is kept literal, including shell syntax and placeholder-like text inside extracted values. The default Markdown links escape brackets in entry titles and encode special characters in link paths. Empty templates omit their rows.
+Templates substitute `{title}`, `{escaped-title}`, `{path}`, `{link}`, `{description}`, and `{icon}` once. `{title}` is raw text; `{escaped-title}` escapes brackets and backslashes for Markdown links, and is used by the default entry template. Use `{title}` for plain text and `{escaped-title}` for custom Markdown links. In entry rows, `path` is workspace-relative, `link` is output-relative, and `icon` uses `file-icon`. For section and directory rows, they refer to the section directory and `directory-icon`; `description` is empty. Input text is kept literal, including shell syntax and placeholder-like text inside extracted values. Link paths encode special characters. Empty templates omit their rows.
 
 ## Requirements and validation
 
-Use a runner with Bash 4.4+, `jq`, GNU coreutils (`realpath` with `-m`, `-s`, and `--relative-to`, plus `mv -T`), and Unix text tools including `awk`, `sed`, and `find -print0`. Ubuntu hosted runners provide these tools. If your runner needs dependencies, install them first using [Actions Toolbox](../actions-toolbox/).
+Use a runner with Bash 4.4+, `jq`, GNU coreutils (`realpath` with `-m`, `-s`, and `--relative-to`, plus `mv -T`), and Unix text tools including `awk`, `grep`, and `find -print0`. Ubuntu hosted runners provide these tools. If your runner needs dependencies, install them first using [Actions Toolbox](../actions-toolbox/).
 
 All paths must stay within `GITHUB_WORKSPACE` and cannot contain parent traversal segments or backslashes. Explicit symlink paths and paths resolving outside the workspace fail. Missing source directories are treated as empty sections; `skip-empty: false` can keep their headings. `readme-path` must name a file; directory targets are rejected. Generation uses a temporary file and replaces the output only on success, so invalid configuration leaves an existing output intact.
 

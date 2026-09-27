@@ -60,7 +60,7 @@ printf '# Beta\n\n## Summary\n\nNested guide.\n' > "$GITHUB_WORKSPACE/docs/sub/b
 printf '# Private\n' > "$GITHUB_WORKSPACE/docs/private/hidden.md"
 printf '# Internal\n' > "$GITHUB_WORKSPACE/docs/_internal.md"
 export INPUT_TITLE='Library' INPUT_DESCRIPTION='Documentation for the library.' INPUT_FOOTER='See the license.'
-export INPUT_README_PATH='catalog//./README.md' INPUT_ENTRY_TEMPLATE='- [{title}]({link})'
+export INPUT_README_PATH='catalog//./README.md' INPUT_ENTRY_TEMPLATE='- [{escaped-title}]({link})'
 export INPUT_DESCRIPTION_TEMPLATE='  {description}'
 export INPUT_SECTIONS='[{"title":"Guides","path":"./docs/","include":["**/*.md"],"exclude":["private","_*.md"],"recursive":true,"title-pattern":"^# +(.+)$","description-heading":"Summary","show-directory":false}]'
 assert_readme docs 'generic recursive documentation, filtering, and nested output links'
@@ -180,3 +180,16 @@ jq -e --slurpfile actual "$TEST_ROOT/wiring.json" '
 ' "$TEST_ROOT/inputs.json" >/dev/null
 cmp "$TEST_ROOT/original.md" "$SOURCE_ROOT/README.md"
 pass 'every input is wired through env; checkout README.md remains unchanged'
+
+new_workspace path-globs
+mkdir -p "$GITHUB_WORKSPACE/sub/deep"
+for path in sub/a.md sub/deep/b.md sub/deep/c.md; do printf '# Item\n' > "$GITHUB_WORKSPACE/$path"; done
+export INPUT_ENTRY_TEMPLATE='- {path}'
+export INPUT_SECTIONS='[{"title":"Direct","path":".","recursive":true,"include":["sub/*.md"],"show-directory":false},{"title":"Recursive","path":".","recursive":true,"include":["sub/**/*.md"],"show-directory":false},{"title":"Filtered","path":".","recursive":true,"include":["sub/**/*.md"],"exclude":["sub/[ad]*.md"],"show-directory":false}]'
+assert_readme path-globs 'path globs match segments; recursive globbing and exclusions respect separators'
+
+new_workspace title-forms
+mkdir -p "$GITHUB_WORKSPACE/items"
+printf '%s\n' '# Alpha [guide] \ path' > "$GITHUB_WORKSPACE/items/a.md"
+export INPUT_SECTIONS='[{"title":"Links","path":"items","title-pattern":"^# +(.+)$","show-directory":false},{"title":"Plain","path":"items","title-pattern":"^# +(.+)$","show-directory":false,"entry-template":"- {title}"},{"title":"Escaped","path":"items","title-pattern":"^# +(.+)$","show-directory":false,"entry-template":"- {escaped-title}"}]'
+assert_readme title-forms 'titles remain raw in custom templates; Markdown links use escaped-title'

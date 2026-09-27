@@ -14,13 +14,18 @@ json_object() {
 }
 
 render_template() {
-  local text="$1" result='' token key
+  local text="$1" result='' token key lookup value
   local -n record="$2"
   [[ -n "$text" ]] || return 0
   while [[ "$text" =~ \{([a-z][a-z-]*)\} ]]; do
     token="${BASH_REMATCH[0]}" key="${BASH_REMATCH[1]}"
-    [[ ${record[$key]+present} ]] || fail "Unknown template placeholder: $token"
-    result+="${text%%"$token"*}${record[$key]}"
+    lookup="$key"; [[ "$key" != escaped-title ]] || lookup=title
+    [[ ${record[$lookup]+present} ]] || fail "Unknown template placeholder: $token"
+    value="${record[$lookup]}"
+    if [[ "$key" == escaped-title ]]; then
+      value="${value//\\/\\\\}"; value="${value//\[/\\[}"; value="${value//\]/\\]}"
+    fi
+    result+="${text%%"$token"*}$value"
     text="${text#*"$token"}"
   done
   printf '%s\n' "$result$text"

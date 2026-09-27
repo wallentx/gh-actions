@@ -62,13 +62,27 @@ append_block() {
   has_content=true
 }
 
+# Match each path component separately; only a complete ** component recurses.
+# shellcheck disable=SC2053
+path_glob() {
+  local file="$1" pattern="$2" head="${2%%/*}"
+  [[ "$pattern" != '**' ]] || return 0
+  if [[ "$head" == '**' && "$pattern" == */* ]]; then
+    path_glob "$file" "${pattern#*/}" && return 0
+    [[ "$file" == */* ]] && path_glob "${file#*/}" "$pattern"
+  elif [[ "$file" == */* && "$pattern" == */* ]]; then
+    [[ "${file%%/*}" == $head ]] && path_glob "${file#*/}" "${pattern#*/}"
+  else
+    [[ "$file" != */* && "$pattern" != */* && "$file" == $pattern ]]
+  fi
+}
+
 matches() {
   local file="$1" pattern candidate
   shift
   for pattern in "$@"; do
     candidate="$file"; [[ "$pattern" == */* ]] || candidate="${file##*/}"
-    # shellcheck disable=SC2053
-    if [[ "$candidate" == $pattern || ( "$pattern" == '**/'* && "$candidate" == ${pattern#\*\*/} ) ]]; then return 0; fi
+    if path_glob "$candidate" "$pattern"; then return 0; fi
   done
   return 1
 }
@@ -151,7 +165,6 @@ render_entry() {
     [[ ! -f "$sibling" ]] || target="$sibling"
   fi
   row[link]="$(relative_link "$target" "$directory")"
-  row[title]="$(printf '%s' "${row[title]}" | sed 's/[][\\]/\\&/g')"
   emit_rows section row entry
   [[ -z ${row[description]} ]] || emit_rows section row description
 }

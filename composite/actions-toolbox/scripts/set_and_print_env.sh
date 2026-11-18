@@ -14,11 +14,6 @@ fi
 # Environment Variable Setup
 # -----------------------------
 
-# Export existing GITHUB_ variables to the environment
-while IFS='=' read -r name value; do
-  export "$name=$value"
-done < <(env | grep '^GITHUB_')
-
 # Function to convert seconds into a readable format (weeks, days, hours, minutes, seconds)
 format_time() {
   local total_seconds=$1
@@ -105,18 +100,39 @@ sEnvRaw() {
 }
 
 paths_to_json_array() {
-    jq -R -s -c 'split("\n") | map(select(length > 0)) | unique'
+    jq -R -s -c 'split("\u0000") | map(select(length > 0)) | unique'
+}
+
+metadata_commit_sha() {
+    git -C "${GITHUB_WORKSPACE:-$PWD}" rev-parse HEAD 2>/dev/null || printf '%s\n' "${GITHUB_SHA:-}"
+}
+
+ensure_git_commit() {
+    local sha="$1"
+    local workspace="${GITHUB_WORKSPACE:-$PWD}"
+
+    [[ "$sha" =~ ^[[:xdigit:]]{40}$ || "$sha" =~ ^[[:xdigit:]]{64}$ ]] || return 1
+    if git -C "$workspace" cat-file -e "${sha}^{commit}" 2>/dev/null; then
+        return 0
+    fi
+
+    # Use the caller's gh authentication for this fetch without persisting
+    # credentials or changing the caller's checkout configuration.
+    git -C "$workspace" -c credential.helper= -c 'credential.helper=!gh auth git-credential' \
+        fetch --no-tags --depth=1 origin "$sha" &&
+        git -C "$workspace" cat-file -e "${sha}^{commit}"
 }
 
 git_changed_files_json() {
     local diff_filter="$1"
     local base_sha="${2-}"
     local head_sha="${3:-$GITHUB_SHA}"
+    local workspace="${GITHUB_WORKSPACE:-$PWD}"
 
     if [[ -n "$base_sha" && "$base_sha" != "0000000000000000000000000000000000000000" ]]; then
-        git diff -M -C --name-only --diff-filter="$diff_filter" "$base_sha" "$head_sha" | paths_to_json_array
+        git -C "$workspace" diff -M -C --name-only -z --diff-filter="$diff_filter" "$base_sha" "$head_sha" | paths_to_json_array
     else
-        git diff-tree -M -C --diff-filter="$diff_filter" --no-commit-id --name-only -r -m "$head_sha" | paths_to_json_array
+        git -C "$workspace" diff-tree -M -C --diff-filter="$diff_filter" --no-commit-id --name-only -z -r -m "$head_sha" | paths_to_json_array
     fi
 }
 
@@ -200,7 +216,7 @@ set_basic_repository_env() {
     # Set GH_REPO_NAME (same as REPO)
     sEnv GH_REPO_NAME "$repo_name" || sEnv GH_REPO_NAME ""
     # Set RFC_REPO
-    sEnv RFC_REPO "$(sed 's/\./-/g; s/_/-/g' <<<"$repo_name")" || sEnv RFC_REPO ""
+    sEnv RFC_REPO "${repo_name//[._]/-}" || sEnv RFC_REPO ""
 }
 
 # Category: Release Info
@@ -235,6 +251,7 @@ set_release_env() {
 # Category: Repository Info
 set_repository_env() {
     local repo_name="${GITHUB_REPOSITORY#*/}"
+    local commit_sha="${1:-$(metadata_commit_sha)}"
     # Set GH_WORKFLOW_URL
     sEnv GH_WORKFLOW_URL "${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" || sEnv GH_WORKFLOW_URL ""
     # Set GPR_PROJECT
@@ -242,7 +259,8 @@ set_repository_env() {
     # Set GH_DEFAULT_BRANCH
     sEnv GH_DEFAULT_BRANCH "$(jq -r '.repository.default_branch' "$GITHUB_EVENT_PATH")" || sEnv GH_DEFAULT_BRANCH ""
     # Set GIT_SHORT_HASH
-    sEnv GIT_SHORT_HASH "$(echo "${GITHUB_SHA}" | cut -c1-8)" || sEnv GIT_SHORT_HASH ""
+    sEnvRaw GIT_SHORT_HASH "${commit_sha:0:8}" || sEnvRaw GIT_SHORT_HASH ""
+    sEnvRaw GH_COMMIT_URL "${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/commit/${commit_sha}" || sEnvRaw GH_COMMIT_URL ""
     # Set GH_REPO_REQUIRED_REVIEWS
     # Note: This may fail if permissions are lacking
     # This needs Administrative: read
@@ -262,7 +280,7 @@ set_changed_files_env() {
     if [[ "$event_name" == "push" ]]; then
         base_sha="$(event_range_base_sha)" || base_sha=""
         head_sha="$(event_range_head_sha)" || head_sha="${GITHUB_SHA:-}"
-        if [[ -n "$base_sha" && "$base_sha" != "0000000000000000000000000000000000000000" ]] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        if [[ -n "$base_sha" && "$base_sha" != "0000000000000000000000000000000000000000" ]] && git -C "${GITHUB_WORKSPACE:-$PWD}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
             if files_changed="$(git_changed_files_json ACMR "$base_sha" "$head_sha")" && files_deleted="$(git_changed_files_json D "$base_sha" "$head_sha")"; then
                 changed_files_collected="true"
             else
@@ -300,24 +318,28 @@ set_changed_files_env() {
             echo "Warning: ${event_name} event payload did not contain pull_request.number; falling back to git changed file detection." >&2
         fi
     elif [[ "$event_name" == "merge_group" ]]; then
-        pr_number="$(event_pr_number)" || pr_number=""
-        if [[ -n "$pr_number" ]]; then
-            if files_changed="$(pr_api_changed_files_json "$pr_number" changed)" && files_deleted="$(pr_api_changed_files_json "$pr_number" deleted)"; then
-                changed_files_collected="true"
-            else
-                echo "Warning: Failed to collect changed files from GitHub API for merge-group PR $pr_number." >&2
-                files_changed="[]"
-                files_deleted="[]"
-            fi
+        # A merge group can contain several PRs. A single PR's file API is
+        # incomplete even when it succeeds, so always compare the group range.
+        base_sha="$(jq -r '.merge_group.base_sha // empty' "$GITHUB_EVENT_PATH")" || base_sha=""
+        head_sha="$(jq -r '.merge_group.head_sha // empty' "$GITHUB_EVENT_PATH")" || head_sha=""
+        if ensure_git_commit "$base_sha" && ensure_git_commit "$head_sha" &&
+            files_changed="$(git_changed_files_json ACMRT "$base_sha" "$head_sha")" &&
+            files_deleted="$(git_changed_files_json D "$base_sha" "$head_sha")"; then
+            changed_files_collected="true"
         else
-            echo "Warning: Could not extract PR number from merge_group ref '${GITHUB_REF_NAME:-}'; falling back to git changed file detection." >&2
+            echo "::error::Cannot collect the complete merge-group file range ${base_sha:-missing base}..${head_sha:-missing head}." >&2
+            # Unknown is distinct from an empty diff: consumers must not skip
+            # checks based on a partially collected or unavailable file set.
+            set_changed_file_env_raw FILES_CHANGED 'null'
+            set_changed_file_env_raw FILES_DELETED 'null'
+            return 1
         fi
     fi
 
     if [[ "$changed_files_collected" != "true" && "$event_name" != "push" ]]; then
         base_sha="$(event_range_base_sha)" || base_sha=""
         head_sha="$(event_range_head_sha)" || head_sha="${GITHUB_SHA:-}"
-        if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        if git -C "${GITHUB_WORKSPACE:-$PWD}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
             if files_changed="$(git_changed_files_json ACMR "$base_sha" "$head_sha")" && files_deleted="$(git_changed_files_json D "$base_sha" "$head_sha")"; then
                 changed_files_collected="true"
             else
@@ -528,7 +550,6 @@ set_pr_env() {
 
 # Category: Additional Info
 set_additional_env() {
-    sEnv GH_COMMIT_URL "${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}" || sEnv GH_COMMIT_URL ""
     sEnv GH_REPO_URL "${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}" || sEnv GH_REPO_URL ""
     sEnv GH_REPO_TOPICS "$(jq -c -r '.repository.topics' "$GITHUB_EVENT_PATH")" || sEnv GH_REPO_TOPICS ""
 }
@@ -737,14 +758,19 @@ set_version_env() {
 # -----------------------------
 
 main() {
+    local commit_sha
+    local changed_files_status=0
+    commit_sha="$(metadata_commit_sha)"
     # Categories: Basic Repository Info, Release Info, Repository Info, Changed Files, PR Info, Additional Info, Versioning Info
     set_basic_repository_env
     set_release_env
-    set_repository_env
-    set_changed_files_env
+    set_repository_env "$commit_sha"
+    # Publish independent metadata before reporting an incomplete snapshot.
+    set_changed_files_env || changed_files_status=$?
     set_pr_env
     set_additional_env
     set_version_env
+    return "$changed_files_status"
 }
 
 # Invoke main unless this file is sourced by its fixture tests.

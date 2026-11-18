@@ -117,7 +117,7 @@ jobs:
       - name: Preserve a first-snapshot value
         run: |
           set -euo pipefail
-          [[ "${ACTIONS_TOOLBOX_MARKER:-}" == '2' ]]
+          [[ "${ACTIONS_TOOLBOX_MARKER:-}" == '3' ]]
           echo 'GH_COMMIT_URL=first-snapshot-sentinel' >> "$GITHUB_ENV"
 
       - name: Reuse metadata and request another package
@@ -131,7 +131,7 @@ jobs:
       - name: Verify snapshot reuse and repeated dependency setup
         run: |
           set -euo pipefail
-          [[ "${ACTIONS_TOOLBOX_MARKER:-}" == '2' ]]
+          [[ "${ACTIONS_TOOLBOX_MARKER:-}" == '3' ]]
           [[ "${GH_COMMIT_URL:-}" == 'first-snapshot-sentinel' ]]
           command -v sponge
 

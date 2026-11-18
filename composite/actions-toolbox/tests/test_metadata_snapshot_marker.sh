@@ -32,6 +32,7 @@ run_plan() {
   INPUT_MARKER_MODE="$mode" \
     INPUT_CHECKOUT="$checkout" \
     ACTIONS_TOOLBOX_MARKER="$marker" \
+    ACTIONS_TOOLBOX_WORKTREE="${TEST_WORKTREE_SIGNATURE-none}" \
     GITHUB_OUTPUT="$output_file" \
     GITHUB_ENV="$env_file" \
     bash "$PLANNER"
@@ -44,13 +45,14 @@ test_first_auto_writes_marker() {
   assert_output "$output_file" 'run-snapshot=true'
   assert_output "$output_file" 'write-marker=true'
   GITHUB_ENV="$env_file" bash "$PLANNER" write-marker
-  assert_output "$env_file" 'ACTIONS_TOOLBOX_MARKER=2'
+  assert_output "$env_file" 'ACTIONS_TOOLBOX_MARKER=3'
+  assert_output "$env_file" 'ACTIONS_TOOLBOX_WORKTREE=none'
 }
 
 test_matching_auto_skips_snapshot() {
   local output_file="$1"
   local env_file="$2"
-  run_plan auto false 2 "$output_file" "$env_file"
+  run_plan auto false 3 "$output_file" "$env_file"
   assert_output "$output_file" 'run-snapshot=false'
   assert_output "$output_file" 'write-marker=false'
   [[ ! -s "$env_file" ]] || fail 'matching auto marker modified GITHUB_ENV'
@@ -59,7 +61,7 @@ test_matching_auto_skips_snapshot() {
 test_outdated_auto_regenerates() {
   local output_file="$1"
   local env_file="$2"
-  run_plan auto false 1 "$output_file" "$env_file"
+  run_plan auto false 2 "$output_file" "$env_file"
   assert_output "$output_file" 'run-snapshot=true'
   assert_output "$output_file" 'write-marker=true'
 }
@@ -67,12 +69,12 @@ test_outdated_auto_regenerates() {
 test_refresh_invalidates_and_replaces() {
   local output_file="$1"
   local env_file="$2"
-  run_plan refresh false 2 "$output_file" "$env_file"
+  run_plan refresh false 3 "$output_file" "$env_file"
   assert_output "$output_file" 'run-snapshot=true'
   assert_output "$output_file" 'write-marker=true'
   assert_output "$env_file" 'ACTIONS_TOOLBOX_MARKER='
   GITHUB_ENV="$env_file" bash "$PLANNER" write-marker
-  [[ "$(tail -n 1 "$env_file")" == 'ACTIONS_TOOLBOX_MARKER=2' ]] \
+  [[ "$(tail -n 2 "$env_file" | head -n 1)" == 'ACTIONS_TOOLBOX_MARKER=3' ]] \
     || fail 'refresh did not replace the invalidated marker'
 }
 
@@ -91,7 +93,7 @@ test_invalid_mode_fails_before_writes() {
   local error_file="$3"
   : > "$output_file"
   : > "$env_file"
-  if INPUT_MARKER_MODE=invalid INPUT_CHECKOUT=false ACTIONS_TOOLBOX_MARKER=2 \
+  if INPUT_MARKER_MODE=invalid INPUT_CHECKOUT=false ACTIONS_TOOLBOX_MARKER=3 \
     GITHUB_OUTPUT="$output_file" GITHUB_ENV="$env_file" \
     bash "$PLANNER" > "$error_file" 2>&1; then
     fail 'invalid marker mode succeeded'
@@ -105,7 +107,7 @@ test_invalid_mode_fails_before_writes() {
 test_checkout_forces_regeneration() {
   local output_file="$1"
   local env_file="$2"
-  run_plan auto true 2 "$output_file" "$env_file"
+  run_plan auto true 3 "$output_file" "$env_file"
   assert_output "$output_file" 'run-snapshot=true'
   assert_output "$output_file" 'write-marker=true'
   assert_output "$env_file" 'ACTIONS_TOOLBOX_MARKER='
@@ -129,10 +131,20 @@ test_action_keeps_setup_outside_snapshot_gate() {
     || fail 'snapshot steps do not consume the central plan output'
 }
 
+test_missing_worktree_marker_regenerates() {
+  local output_file="$1"
+  local env_file="$2"
+  TEST_WORKTREE_SIGNATURE='' run_plan auto false 3 "$output_file" "$env_file"
+  assert_output "$output_file" 'run-snapshot=true'
+  assert_output "$env_file" 'ACTIONS_TOOLBOX_WORKTREE='
+}
+
 main() {
   local output_file env_file error_file
   TEMP_DIR="$(mktemp -d)"
   trap 'rm -rf "$TEMP_DIR"' EXIT
+  export GITHUB_WORKSPACE="${TEMP_DIR}/workspace"
+  mkdir -p "$GITHUB_WORKSPACE"
   output_file="${TEMP_DIR}/output"
   env_file="${TEMP_DIR}/env"
   error_file="${TEMP_DIR}/error"
@@ -144,6 +156,7 @@ main() {
   test_bypass_ignores_marker "$output_file" "$env_file"
   test_invalid_mode_fails_before_writes "$output_file" "$env_file" "$error_file"
   test_checkout_forces_regeneration "$output_file" "$env_file"
+  test_missing_worktree_marker_regenerates "$output_file" "$env_file"
   test_action_keeps_setup_outside_snapshot_gate
   echo 'PASS: metadata snapshot marker fixtures'
 }

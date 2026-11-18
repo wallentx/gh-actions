@@ -36,34 +36,20 @@ command_exists() {
 parse_package_spec() {
   local spec="$1"
   local separator="$2"
+  local pkg="$spec" version=''
   
   # Check if the argument is in the format command:package=version
   if [[ "$spec" =~ ^([^:]+):([^=]+)(=(.+))?$ ]]; then
     # Format: command:package[=version]
-    local cmd="${BASH_REMATCH[1]}"
-    local pkg="${BASH_REMATCH[2]}"
-    local version="${BASH_REMATCH[4]}"
-    
-    if [ -n "$version" ]; then
-      echo "${pkg}${separator}${version}"
-    else
-      echo "$pkg"
-    fi
+    pkg="${BASH_REMATCH[2]}"
+    version="${BASH_REMATCH[4]}"
   # Check if the argument is in the format package=version
   elif [[ "$spec" =~ ^([^=]+)(=(.+))?$ ]]; then
     # Format: package[=version]
-    local pkg="${BASH_REMATCH[1]}"
-    local version="${BASH_REMATCH[3]}"
-    
-    if [ -n "$version" ]; then
-      echo "${pkg}${separator}${version}"
-    else
-      echo "$pkg"
-    fi
-  else
-    # Plain package name
-    echo "$spec"
+    pkg="${BASH_REMATCH[1]}"
+    version="${BASH_REMATCH[3]}"
   fi
+  echo "${pkg}${version:+${separator}${version}}"
 }
 
 # Function to install required packages on Linux
@@ -718,15 +704,8 @@ fetch_bootstrap_gh_version() {
 append_toolpath() {
   local path="$1"
 
-  if [[ -z "$path" ]]; then
-    return
-  fi
-
-  if [[ -z "$TOOLPATH" ]]; then
-    TOOLPATH="$path"
-  else
-    TOOLPATH="${TOOLPATH}:${path}"
-  fi
+  [[ -n "$path" ]] || return 0
+  TOOLPATH="${TOOLPATH:+${TOOLPATH}:}${path}"
 }
 
 # Function to detect the existing GitHub CLI version
@@ -840,7 +819,7 @@ install_yq() {
 # Function to update the PATH
 update_path() {
   if [[ -n "$TOOLPATH" ]]; then
-    tr ':' '\n' <<<"$TOOLPATH" >> "$GITHUB_PATH"
+    printf '%s\n' "${TOOLPATH//:/$'\n'}" >> "$GITHUB_PATH"
   fi
 }
 
